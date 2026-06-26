@@ -68,10 +68,15 @@ export default function Create() {
         })
       })
       if (!storyRes.ok) {
-        const err = await storyRes.json()
-        throw new Error(err.error || 'Story generation failed. Check your Anthropic API key.')
+        const errText = await storyRes.text()
+        let errMsg = 'Story generation failed.'
+        try { errMsg = JSON.parse(errText).error || errMsg } catch {}
+        throw new Error(errMsg)
       }
       const story = await storyRes.json()
+      if (!story || !story.scenes || !Array.isArray(story.scenes)) {
+        throw new Error('Story format invalid — please try again.')
+      }
       const scenes = story.scenes
       const total = scenes.length
 
