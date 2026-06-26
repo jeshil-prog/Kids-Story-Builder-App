@@ -29,12 +29,8 @@ export default function Create() {
   const [style, setStyle] = useState('Pixar-like')
   const [length, setLength] = useState('story')
   const [generating, setGenerating] = useState(false)
-  const [genStep, setGenStep] = useState(0)
-  const [genDetail, setGenDetail] = useState('')
-  const [genProgress, setGenProgress] = useState(0)
   const [error, setError] = useState(null)
 
-  // Warn user before leaving during generation
   useEffect(() => {
     if (!generating) return
     const handler = (e) => {
@@ -53,12 +49,9 @@ export default function Create() {
   const generate = async () => {
     setGenerating(true)
     setError(null)
-    setGenStep(0)
-    setGenProgress(0)
-    setGenDetail('Claude is writing your story…')
 
     try {
-      // Step 1: Generate story
+      // Step 1: Generate story text only (fast, ~5s, uses server API)
       const storyRes = await fetch('/api/generate-story', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -68,22 +61,15 @@ export default function Create() {
         })
       })
       if (!storyRes.ok) {
-        const errText = await storyRes.text()
-        let errMsg = 'Story generation failed.'
-        try { errMsg = JSON.parse(errText).error || errMsg } catch {}
-        throw new Error(errMsg)
+        const err = await storyRes.json().catch(() => ({}))
+        throw new Error(err.error || 'Story generation failed. Check your Anthropic API key.')
       }
       const story = await storyRes.json()
-      if (!story || !story.scenes || !Array.isArray(story.scenes)) {
-        throw new Error('Story format invalid — please try again.')
-      }
-      const scenes = story.scenes
-      const total = scenes.length
+      if (!story?.scenes?.length) throw new Error('Story came back empty — please try again.')
 
-      setGenStep(1)
-      setGenDetail(`Story written — ${total} scenes ready. Now illustrating…`)
-
-      // Build rich character description for image prompts including AI-analysed appearance
+      // Step 2: Save story immediately WITHOUT images, then navigate
+      // Images will be generated progressively in the story player
+      const id = uuidv4()
       const charDesc = chosenChars.map(c => {
         const parts = [c.name]
         if (c.age) parts.push(`age ${c.age}`)
@@ -92,92 +78,20 @@ export default function Create() {
         return parts.join(', ')
       }).join(' | ')
 
-      // Step 2: Generate images directly from browser to OpenAI (no server timeout)
-      const stylePrefix = {
-        'Watercolour': "soft watercolour children's book illustration, painterly, gentle colours,",
-        'Pixar-like': 'Pixar 3D animation style, warm cinematic lighting, expressive cute characters, highly detailed,',
-        'Storybook': "classic storybook illustration, detailed, warm, hand-painted, fairy tale style,",
-        'Comic book': 'bold comic book illustration, clean linework, bright vivid colours, dynamic composition,',
-        'Anime': 'Studio Ghibli anime style, detailed painterly backgrounds, soft lighting, expressive characters,',
-        'Claymation': 'claymation stop-motion style, tactile textures, warm whimsical, colourful,'
-      }
-      const styleP = stylePrefix[style] || "children's book illustration, warm and magical,"
-      const openAiKey = import.meta.env.VITE_OPENAI_API_KEY
-
-      for (let i = 0; i < scenes.length; i++) {
-        setGenStep(2)
-        setGenDetail(`Illustrating scene ${i + 1} of ${total}…`)
-        setGenProgress(Math.round((i / total) * 100))
-        try {
-          const charNote = charDesc ? `Characters in this scene: ${charDesc}. ` : ''
-          const fullPrompt = `${styleP} ${charNote}${scenes[i].imagePrompt || 'magical storybook scene'}. No text or words in image. Child-safe, warm, magical, beautiful.`
-          const imgRes = await fetch('https://api.openai.com/v1/images/generations', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${openAiKey}`
-            },
-            body: JSON.stringify({
-              model: 'gpt-image-1',
-              prompt: fullPrompt,
-              n: 1,
-              size: '1024x1024',
-              quality: 'low'
-            })
-          })
-          if (imgRes.ok) {
-            const data = await imgRes.json()
-            const b64 = data.data?.[0]?.b64_json
-            if (b64) {
-              scenes[i].imageData = b64
-              scenes[i].imageType = 'image/png'
-            }
-          } else {
-            console.error('Image failed:', imgRes.status)
-          }
-        } catch (err) {
-          console.error('Image error:', err)
-        }
-      }
-
-      setGenStep(3)
-      setGenProgress(100)
-      setGenDetail('Saving your story…')
-
-      // Compress images to reduce localStorage size (5MB limit)
-      const compressImage = (b64, type) => new Promise(resolve => {
-        const img = new Image()
-        img.onload = () => {
-          const canvas = document.createElement('canvas')
-          canvas.width = 512
-          canvas.height = 512
-          const ctx = canvas.getContext('2d')
-          ctx.drawImage(img, 0, 0, 512, 512)
-          const compressed = canvas.toDataURL('image/jpeg', 0.7).split(',')[1]
-          resolve({ b64: compressed, imageType: 'image/jpeg' })
-        }
-        img.onerror = () => resolve({ b64, imageType: type })
-        img.src = `data:${type};base64,${b64}`
-      })
-
-      // Compress all scene images
-      for (let i = 0; i < scenes.length; i++) {
-        if (scenes[i].imageData) {
-          const { b64, imageType } = await compressImage(scenes[i].imageData, scenes[i].imageType || 'image/png')
-          scenes[i].imageData = b64
-          scenes[i].imageType = imageType
-        }
-      }
-
-      const id = uuidv4()
       const fullStory = {
-        id, title: story.title, tagline: story.tagline,
+        id,
+        title: story.title,
+        tagline: story.tagline,
         genre, style, length,
         characters: chosenChars,
-        scenes,
-        createdAt: Date.now()
+        charDesc,
+        scenes: story.scenes,
+        createdAt: Date.now(),
+        imagesGenerating: true  // flag so player knows to generate images
       }
       saveStory(fullStory)
+
+      // Navigate immediately — images generate in the player
       navigate(`/story/${id}`)
     } catch (err) {
       setError(err.message)
@@ -189,45 +103,10 @@ export default function Create() {
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 24, padding: 40 }}>
         <Spinner size={52} />
-
-        {/* Warning banner */}
-        <div style={{
-          background: '#FAEEDA', border: '1px solid #FAC775', borderRadius: 12,
-          padding: '10px 16px', fontSize: 13, color: '#412402',
-          textAlign: 'center', maxWidth: 340
-        }}>
-          ⚠️ Keep this tab open while your story is being created
-        </div>
-
         <div style={{ textAlign: 'center' }}>
-          <p style={{ fontSize: 18, fontWeight: 600, marginBottom: 6 }}>Crafting your story…</p>
-          <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>{genDetail}</p>
+          <p style={{ fontSize: 18, fontWeight: 600, marginBottom: 6 }}>Writing your story…</p>
+          <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Just a few seconds — Claude is crafting your adventure</p>
         </div>
-
-        {/* Progress bar */}
-        {genStep === 2 && (
-          <div style={{ width: '100%', maxWidth: 340 }}>
-            <div style={{ height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
-              <div style={{ height: '100%', width: `${genProgress}%`, background: '#534AB7', borderRadius: 3, transition: 'width 0.5s' }} />
-            </div>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', marginTop: 6 }}>{genProgress}% illustrated</p>
-          </div>
-        )}
-
-        <div style={{ width: '100%', maxWidth: 340, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {['Writing your story', 'Splitting into scenes', 'Illustrating each scene', 'Saving'].map((step, i) => (
-            <div key={step} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{
-                width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-                background: i < genStep ? '#1D9E75' : i === genStep ? '#534AB7' : 'var(--border-strong)',
-                animation: i === genStep ? 'pulse 1.2s ease infinite' : undefined
-              }} />
-              <span style={{ fontSize: 13, color: i <= genStep ? 'var(--text-primary)' : 'var(--text-muted)' }}>{step}</span>
-              {i < genStep && <span style={{ marginLeft: 'auto', fontSize: 12, color: '#1D9E75' }}>✓</span>}
-            </div>
-          ))}
-        </div>
-
         {error && (
           <div style={{ background: '#FCEBEB', border: '1px solid #F09595', borderRadius: 12, padding: '12px 16px', color: '#501313', fontSize: 13, maxWidth: 340, textAlign: 'center' }}>
             {error}
@@ -241,7 +120,6 @@ export default function Create() {
 
   return (
     <div style={{ overflowY: 'auto', flex: 1, padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 28 }}>
-      {/* Step 1: Characters */}
       <section>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
           <div style={{ width: 24, height: 24, borderRadius: '50%', background: '#534AB7', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>1</div>
@@ -274,7 +152,6 @@ export default function Create() {
 
       <div style={{ height: '0.5px', background: 'var(--border)' }} />
 
-      {/* Step 2: Prompt */}
       <section>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
           <div style={{ width: 24, height: 24, borderRadius: '50%', background: '#534AB7', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>2</div>
@@ -310,7 +187,6 @@ export default function Create() {
 
       <div style={{ height: '0.5px', background: 'var(--border)' }} />
 
-      {/* Step 3: Style */}
       <section>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
           <div style={{ width: 24, height: 24, borderRadius: '50%', background: '#534AB7', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>3</div>
@@ -332,7 +208,6 @@ export default function Create() {
 
       <div style={{ height: '0.5px', background: 'var(--border)' }} />
 
-      {/* Step 4: Length */}
       <section>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
           <div style={{ width: 24, height: 24, borderRadius: '50%', background: '#534AB7', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>4</div>
