@@ -8,32 +8,49 @@ export default async function handler(req, res) {
   const sceneCount = length === 'quick' ? 5 : length === 'chapter' ? 10 : 8
 
   const characterDesc = characters.map(c =>
-    `- ${c.name}${c.age ? `, age ${c.age}` : ''}${c.personality ? ` (${c.personality})` : ''}`
+    `- ${c.name}${c.age ? `, age ${c.age}` : ''}${c.personality ? ` — ${c.personality}` : ''}${c.role ? ` (${c.role})` : ''}`
   ).join('\n')
 
-  const systemPrompt = `You are a children's storybook author. You write warm, imaginative bedtime stories for young children (ages 3–10). 
-Your stories are gentle, wonder-filled, and always end happily. Each scene is vivid and visual.
-Respond ONLY with a valid JSON object — no markdown fences, no extra text.`
+  const styleGuide = {
+    'Watercolour': 'soft watercolour painting, gentle washes of colour, delicate brushstrokes, children\'s book illustration style',
+    'Pixar-like': 'Pixar 3D animation render, warm cinematic lighting, highly detailed, expressive characters, beautiful environments',
+    'Storybook': 'classic fairy tale storybook illustration, detailed hand-painted, warm golden light, magical atmosphere',
+    'Comic book': 'bold comic book illustration, strong linework, vivid saturated colours, dynamic angles',
+    'Anime': 'Studio Ghibli anime style, lush detailed backgrounds, soft warm lighting, expressive emotional characters',
+    'Claymation': 'claymation stop-motion style, tactile clay textures, bright cheerful colours, whimsical and charming'
+  }
+  const visualStyle = styleGuide[style] || 'beautiful children\'s book illustration'
 
-  const userPrompt = `Write a ${sceneCount}-scene children's storybook story.
+  const systemPrompt = `You are a gifted children's storybook author. You write warm, imaginative, lyrical bedtime stories for young children aged 3-10.
 
-Characters:
+Your stories:
+- Are told in third person, present tense
+- Use short, musical sentences perfect for reading aloud
+- Build wonder and delight in every scene
+- Always end happily and peacefully
+- Feel personal — the named characters are the true heroes
+
+Respond ONLY with valid JSON. No markdown, no code fences, no extra text.`
+
+  const userPrompt = `Write a ${sceneCount}-scene personalised children's bedtime story.
+
+Characters starring in this story:
 ${characterDesc}
 
-Story prompt: "${prompt}"
+Story idea: "${prompt}"
 Genre: ${genre}
-Visual style: ${style}
+Visual style for illustrations: ${style}
 
-Return a JSON object with this exact shape:
+Return this exact JSON shape:
 {
-  "title": "Story title",
-  "tagline": "One-line description",
+  "title": "A magical story title featuring the character names",
+  "tagline": "One warm sentence teaser",
   "scenes": [
     {
       "sceneNumber": 1,
-      "chapter": "Chapter title (group 2-3 scenes per chapter)",
-      "narration": "2-3 sentences of story narration, lyrical and read-aloud friendly",
-      "imagePrompt": "Detailed visual description for AI image generation. Include: art style (${style} illustration style), character appearances, setting, lighting, mood. Make it specific and painterly. Do not include text or words in the image."
+      "chapter": "Short evocative chapter/scene title",
+      "narration": "3-4 sentences of lyrical story narration. Use the characters' actual names. Make it vivid and read-aloud beautiful. End on a sense of wonder or warmth.",
+      "imagePrompt": "Detailed illustration prompt: ${visualStyle}. Describe the scene vividly — the characters (their approximate age and look), the setting, the lighting, the mood, the key action. Make it cinematic and beautiful. Do NOT include any text, letters, or words in the image description."
     }
   ]
 }`
