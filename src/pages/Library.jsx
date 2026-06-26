@@ -8,7 +8,7 @@ const PALETTE = ['#0F3460','#1a0533','#023020','#1a1000','#2d0a20','#001a2d']
 
 export default function Library() {
   const navigate = useNavigate()
-  const { stories, deleteStory } = useStore()
+  const { stories, deleteStory, getStory } = useStore()
 
   if (stories.length === 0) {
     return (
@@ -45,8 +45,8 @@ export default function Library() {
               background: s.scenes?.[0]?.imageData ? 'transparent' : PALETTE[i % PALETTE.length],
               display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36, overflow: 'hidden'
             }}>
-              {s.scenes?.[0]?.imageData
-                ? <img src={`data:${s.scenes[0].imageType || 'image/png'};base64,${s.scenes[0].imageData}`} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              {getStory(s.id)?.scenes?.[0]?.imageData
+                ? <img src={`data:${getStory(s.id).scenes[0].imageType || 'image/jpeg'};base64,${getStory(s.id).scenes[0].imageData}`} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 : GENRE_EMOJI[s.genre] || '📖'
               }
               <span style={{

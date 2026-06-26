@@ -5,8 +5,8 @@ import { useStore } from '../lib/store'
 export default function StoryPlayer() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { stories } = useStore()
-  const story = stories.find(s => s.id === id)
+  const { getStory } = useStore()
+  const story = getStory(id)
   const [scene, setScene] = useState(0)
   const [projector, setProjector] = useState(false)
   const [speaking, setSpeaking] = useState(false)

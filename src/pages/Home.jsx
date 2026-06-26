@@ -7,7 +7,7 @@ const GENRE_EMOJI = { Ocean:'🌊', Bedtime:'🌙', Fantasy:'🧙', Space:'🚀'
 
 export default function Home() {
   const navigate = useNavigate()
-  const { characters, stories } = useStore()
+  const { characters, stories, getStory } = useStore()
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 28, padding: '24px 20px', overflowY: 'auto', flex: 1 }}>
@@ -92,7 +92,7 @@ export default function Home() {
                   display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36, overflow: 'hidden'
                 }}>
                   {s.scenes?.[0]?.imageData
-                    ? <img src={`data:${s.scenes[0].imageType || 'image/png'};base64,${s.scenes[0].imageData}`} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ? (() => { const full = getStory(s.id); const img = full?.scenes?.[0]; return img?.imageData ? <img src={`data:${img.imageType || 'image/jpeg'};base64,${img.imageData}`} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : null })()
                     : (GENRE_EMOJI[s.genre] || '📖')}
                 </div>
                 <div style={{ padding: '10px 12px' }}>
