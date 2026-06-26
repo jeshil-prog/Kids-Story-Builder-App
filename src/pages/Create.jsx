@@ -92,28 +92,51 @@ export default function Create() {
         return parts.join(', ')
       }).join(' | ')
 
-      // Step 2: Generate images one at a time (avoid rate limits, update progress)
+      // Step 2: Generate images directly from browser to OpenAI (no server timeout)
+      const stylePrefix = {
+        'Watercolour': "soft watercolour children's book illustration, painterly, gentle colours,",
+        'Pixar-like': 'Pixar 3D animation style, warm cinematic lighting, expressive cute characters, highly detailed,',
+        'Storybook': "classic storybook illustration, detailed, warm, hand-painted, fairy tale style,",
+        'Comic book': 'bold comic book illustration, clean linework, bright vivid colours, dynamic composition,',
+        'Anime': 'Studio Ghibli anime style, detailed painterly backgrounds, soft lighting, expressive characters,',
+        'Claymation': 'claymation stop-motion style, tactile textures, warm whimsical, colourful,'
+      }
+      const styleP = stylePrefix[style] || "children's book illustration, warm and magical,"
+      const openAiKey = import.meta.env.VITE_OPENAI_API_KEY
+
       for (let i = 0; i < scenes.length; i++) {
         setGenStep(2)
         setGenDetail(`Illustrating scene ${i + 1} of ${total}…`)
         setGenProgress(Math.round((i / total) * 100))
         try {
-          const imgRes = await fetch('/api/generate-image', {
+          const charNote = charDesc ? `Characters in this scene: ${charDesc}. ` : ''
+          const fullPrompt = `${styleP} ${charNote}${scenes[i].imagePrompt || 'magical storybook scene'}. No text or words in image. Child-safe, warm, magical, beautiful.`
+          const imgRes = await fetch('https://api.openai.com/v1/images/generations', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${openAiKey}`
+            },
             body: JSON.stringify({
-              imagePrompt: scenes[i].imagePrompt,
-              style,
-              characterDescriptions: charDesc
+              model: 'gpt-image-1',
+              prompt: fullPrompt,
+              n: 1,
+              size: '1024x1024',
+              quality: 'low'
             })
           })
           if (imgRes.ok) {
-            const { b64, contentType } = await imgRes.json()
-            scenes[i].imageData = b64
-            scenes[i].imageType = contentType || 'image/png'
+            const data = await imgRes.json()
+            const b64 = data.data?.[0]?.b64_json
+            if (b64) {
+              scenes[i].imageData = b64
+              scenes[i].imageType = 'image/png'
+            }
+          } else {
+            console.error('Image failed:', imgRes.status)
           }
-        } catch {
-          // image failed silently — story still readable
+        } catch (err) {
+          console.error('Image error:', err)
         }
       }
 
