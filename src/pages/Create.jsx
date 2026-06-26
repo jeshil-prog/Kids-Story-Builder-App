@@ -117,6 +117,31 @@ export default function Create() {
       setGenProgress(100)
       setGenDetail('Saving your story…')
 
+      // Compress images to reduce localStorage size (5MB limit)
+      const compressImage = (b64, type) => new Promise(resolve => {
+        const img = new Image()
+        img.onload = () => {
+          const canvas = document.createElement('canvas')
+          canvas.width = 512
+          canvas.height = 512
+          const ctx = canvas.getContext('2d')
+          ctx.drawImage(img, 0, 0, 512, 512)
+          const compressed = canvas.toDataURL('image/jpeg', 0.7).split(',')[1]
+          resolve({ b64: compressed, imageType: 'image/jpeg' })
+        }
+        img.onerror = () => resolve({ b64, imageType: type })
+        img.src = `data:${type};base64,${b64}`
+      })
+
+      // Compress all scene images
+      for (let i = 0; i < scenes.length; i++) {
+        if (scenes[i].imageData) {
+          const { b64, imageType } = await compressImage(scenes[i].imageData, scenes[i].imageType || 'image/png')
+          scenes[i].imageData = b64
+          scenes[i].imageType = imageType
+        }
+      }
+
       const id = uuidv4()
       const fullStory = {
         id, title: story.title, tagline: story.tagline,
