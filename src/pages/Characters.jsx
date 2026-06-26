@@ -78,6 +78,30 @@ function CharacterForm({ initial, onSave, onCancel }) {
 
   const valid = name.trim().length > 0
 
+  const handleSave = async () => {
+    if (!valid) return
+    let photoUrl = initial?.photoUrl || null
+
+    // Upload photo to fal.ai storage if we have a new photo
+    if (photoBase64 && photoBase64 !== initial?.photoBase64) {
+      try {
+        const res = await fetch('/api/upload-photo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ base64: photoBase64, mimeType: photoMime })
+        })
+        if (res.ok) {
+          const data = await res.json()
+          photoUrl = data.url
+        }
+      } catch (err) {
+        console.error('Photo upload failed:', err)
+      }
+    }
+
+    onSave({ name, age, personality, role, photo, photoBase64, photoMime, photoUrl, description })
+  }
+
   return (
     <div style={{ background: 'var(--surface-card)', border: '0.5px solid var(--border)', borderRadius: 16, padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Photo upload */}
@@ -174,7 +198,7 @@ function CharacterForm({ initial, onSave, onCancel }) {
 
       <div style={{ display: 'flex', gap: 10 }}>
         <Button onClick={onCancel} variant="secondary" style={{ flex: 1 }}>Cancel</Button>
-        <Button onClick={() => valid && onSave({ name, age, personality, role, photo, photoBase64, photoMime, description })} disabled={!valid} style={{ flex: 1 }}>
+        <Button onClick={handleSave} disabled={!valid} style={{ flex: 1 }}>
           Save character
         </Button>
       </div>

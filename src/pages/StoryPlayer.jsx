@@ -41,69 +41,76 @@ export default function StoryPlayer() {
     imageGenRef.current = true
     setGeneratingImages(true)
 
-    const openAiKey = import.meta.env.VITE_OPENAI_API_KEY
-    if (!openAiKey) {
-      console.error('VITE_OPENAI_API_KEY not set')
-      setGeneratingImages(false)
-      return
-    }
-
-    const styleP = STYLE_PROMPTS[s.style] || "children's book illustration, warm and magical,"
-    const charNote = s.charDesc ? `Characters: ${s.charDesc}. ` : ''
     const scenes = [...s.scenes]
     const total = scenes.length
+
+    // Get character photo URL from first character (if available)
+    const characterPhotoUrl = s.characters?.[0]?.photoUrl || null
 
     for (let i = 0; i < total; i++) {
       setImageProgress(i)
       try {
-        const fullPrompt = `${styleP} ${charNote}${scenes[i].imagePrompt || 'magical storybook scene'}. No text or words in image. Child-safe, warm, magical, beautiful.`
-        const res = await fetch('https://api.openai.com/v1/images/generations', {
+        // Step 1: Submit job to fal.ai queue (fast, < 2s)
+        const submitRes = await fetch('/api/generate-image-job', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${openAiKey}`
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'gpt-image-1',
-            prompt: fullPrompt,
-            n: 1,
-            size: '1024x1024',
-            quality: 'low'
+            imagePrompt: scenes[i].imagePrompt || 'magical storybook scene',
+            style: s.style,
+            characterPhotoUrl
           })
         })
 
-        if (res.ok) {
-          const data = await res.json()
-          const b64 = data.data?.[0]?.b64_json
-          if (b64) {
-            scenes[i] = { ...scenes[i], imageData: b64, imageType: 'image/png' }
-            // Update story in state so image appears immediately
-            setStory(prev => ({
-              ...prev,
-              scenes: scenes.map((sc, idx) => idx === i ? { ...sc, imageData: b64, imageType: 'image/png' } : sc)
-            }))
-            // Save image to localStorage
-            try {
-              localStorage.setItem(`sd_img_${id}_${i}`, JSON.stringify({ imageData: b64, imageType: 'image/png' }))
-            } catch {}
+        if (!submitRes.ok) {
+          console.error(`Scene ${i+1} submit failed:`, submitRes.status)
+          continue
+        }
+
+        const { request_id } = await submitRes.json()
+
+        // Step 2: Poll until complete (from browser, no timeout)
+        let b64 = null
+        let attempts = 0
+        while (attempts < 60 && !b64) {
+          await new Promise(r => setTimeout(r, 3000))
+          attempts++
+          try {
+            const checkRes = await fetch('/api/check-image-job', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ request_id })
+            })
+            if (checkRes.ok) {
+              const data = await checkRes.json()
+              if (data.status === 'COMPLETED' && data.b64) {
+                b64 = data.b64
+              } else if (data.status === 'FAILED') {
+                console.error(`Scene ${i+1} generation failed`)
+                break
+              }
+            }
+          } catch (pollErr) {
+            console.error('Poll error:', pollErr)
           }
-        } else {
-          const errText = await res.text()
-          console.error(`Image ${i+1} failed (${res.status}):`, errText)
+        }
+
+        if (b64) {
+          scenes[i] = { ...scenes[i], imageData: b64, imageType: 'image/jpeg' }
+          setStory(prev => ({
+            ...prev,
+            scenes: prev.scenes.map((sc, idx) => idx === i ? { ...sc, imageData: b64, imageType: 'image/jpeg' } : sc)
+          }))
+          try {
+            localStorage.setItem(`sd_img_${id}_${i}`, JSON.stringify({ imageData: b64, imageType: 'image/jpeg' }))
+          } catch {}
         }
       } catch (err) {
-        console.error(`Image ${i+1} error:`, err)
+        console.error(`Scene ${i+1} error:`, err)
       }
-
-      // Rate limit protection: wait 3s between requests
-      if (i < total - 1) await new Promise(r => setTimeout(r, 3000))
     }
 
-    // Mark images as done
     setImageProgress(total)
     setGeneratingImages(false)
-
-    // Update story to remove imagesGenerating flag
     const updated = { ...s, scenes, imagesGenerating: false }
     saveStory(updated)
   }
