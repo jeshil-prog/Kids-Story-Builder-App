@@ -181,7 +181,7 @@ export default function StoryPlayer() {
   // Play ambient SFX for current scene
   useEffect(() => {
     if (!current?.narration) return
-    const sfxUrl = getSfxForScene(current.narration)
+    const sfxUrl = getSfxForScene(current)
     if (sfxUrl) {
       playAmbientSfx(sfxUrl, 0.12)
     } else {

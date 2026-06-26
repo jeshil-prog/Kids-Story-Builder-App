@@ -57,7 +57,8 @@ Return this exact JSON shape:
       "sceneNumber": 1,
       "chapter": "Short exciting scene title (e.g. 'The Discovery', 'Setting Sail', 'The Hidden Cave')",
       "narration": "3-5 sentences telling this part of the story. Use character names. Include vivid details, emotions, and dialogue. Match the warm adventure tone of the example.",
-      "imagePrompt": "Detailed illustration description: ${visualStyle}. Describe the scene — who is in it, what they look like, what they are doing, the setting, the lighting, the mood. Make it cinematic and beautiful. No text or words in the image."
+      "imagePrompt": "Detailed illustration description: ${visualStyle}. Describe the scene — who is in it, what they look like, what they are doing, the setting, the lighting, the mood. Make it cinematic and beautiful. No text or words in the image.",
+      "sfx": "Pick ONE sound that best fits this scene from this exact list: ocean, waves, jungle, forest, birds, wind, rain, thunder, fire, magic, sparkle, space, adventure, mystery, night, underwater, cave, celebration, victory, happy. Every scene must have one."
     }
   ]
 }`
