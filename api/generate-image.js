@@ -3,7 +3,7 @@ export const config = { maxDuration: 60 }
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  const { imagePrompt, style } = req.body
+  const { imagePrompt, style, characterDescriptions } = req.body
 
   const stylePrefix = {
     'Watercolour': 'soft watercolour children\'s book illustration, painterly, gentle colours,',
@@ -15,48 +15,36 @@ export default async function handler(req, res) {
   }
 
   const prefix = stylePrefix[style] || 'children\'s book illustration, warm and magical,'
-  const fullPrompt = `${prefix} ${imagePrompt}. No text or words in image. Child-safe, warm, magical, dreamlike, beautiful.`
+  const charNote = characterDescriptions ? `Characters in this scene: ${characterDescriptions}. ` : ''
+  const fullPrompt = `${prefix} ${charNote}${imagePrompt}. No text or words in image. Child-safe, warm, magical, beautiful.`
 
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent?key=${process.env.GOOGLE_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{ text: fullPrompt }]
-          }],
-          generationConfig: {
-            responseModalities: ['IMAGE'],
-            responseMimeType: 'image/jpeg'
-          }
-        })
-      }
-    )
+    const response = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-image-1',
+        prompt: fullPrompt,
+        n: 1,
+        size: '1024x1024',
+        quality: 'medium'
+      })
+    })
 
     if (!response.ok) {
       const err = await response.text()
-      console.error('Gemini error:', response.status, err)
+      console.error('OpenAI image error:', response.status, err)
       return res.status(500).json({ error: `Image generation failed: ${response.status}`, detail: err })
     }
 
     const data = await response.json()
-
-    const parts = data?.candidates?.[0]?.content?.parts
-    const imagePart = parts?.find(p => p.inlineData)
-
-    if (!imagePart?.inlineData) {
-      console.error('No image in Gemini response:', JSON.stringify(data))
-      return res.status(500).json({ error: 'No image returned from Gemini' })
-    }
-
-    const b64 = imagePart.inlineData.data
-    const contentType = imagePart.inlineData.mimeType || 'image/jpeg'
-
-    return res.status(200).json({ b64, contentType })
+    const b64 = data.data[0].b64_json
+    return res.status(200).json({ b64, contentType: 'image/png' })
   } catch (err) {
-    console.error('Gemini fetch error:', err)
+    console.error('OpenAI image fetch error:', err)
     res.status(500).json({ error: err.message })
   }
 }
