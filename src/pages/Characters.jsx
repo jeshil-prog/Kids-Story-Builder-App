@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react'
 import { useStore } from '../lib/store'
-import { Avatar, Button, Input, SectionLabel } from '../components/UI'
+import { Avatar, Button, Input, Spinner } from '../components/UI'
 
 const PERSONALITIES = ['Brave', 'Curious', 'Funny', 'Kind', 'Adventurous', 'Clever', 'Gentle', 'Playful']
 
@@ -10,14 +10,70 @@ function CharacterForm({ initial, onSave, onCancel }) {
   const [personality, setPersonality] = useState(initial?.personality || '')
   const [role, setRole] = useState(initial?.role || '')
   const [photo, setPhoto] = useState(initial?.photo || null)
+  const [photoBase64, setPhotoBase64] = useState(initial?.photoBase64 || null)
+  const [photoMime, setPhotoMime] = useState(initial?.photoMime || 'image/jpeg')
+  const [description, setDescription] = useState(initial?.description || '')
+  const [analysing, setAnalysing] = useState(false)
   const fileRef = useRef()
 
-  const handlePhoto = (e) => {
+  const handlePhoto = async (e) => {
     const file = e.target.files[0]
     if (!file) return
+
+    // Read as data URL for display
     const reader = new FileReader()
-    reader.onload = () => setPhoto(reader.result)
+    reader.onload = async () => {
+      const dataUrl = reader.result
+      setPhoto(dataUrl)
+
+      // Extract base64 for API
+      const base64 = dataUrl.split(',')[1]
+      setPhotoBase64(base64)
+      setPhotoMime(file.type || 'image/jpeg')
+
+      // Auto-analyse the photo
+      if (name || initial?.name) {
+        setAnalysing(true)
+        try {
+          const res = await fetch('/api/describe-character', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              photoBase64: base64,
+              mimeType: file.type || 'image/jpeg',
+              name: name || initial?.name,
+              age: age || initial?.age
+            })
+          })
+          if (res.ok) {
+            const { description: desc } = await res.json()
+            setDescription(desc)
+          }
+        } catch (err) {
+          console.error('Photo analysis failed:', err)
+        }
+        setAnalysing(false)
+      }
+    }
     reader.readAsDataURL(file)
+  }
+
+  // Also analyse when name is filled in after photo
+  const handleAnalyse = async () => {
+    if (!photoBase64 || analysing) return
+    setAnalysing(true)
+    try {
+      const res = await fetch('/api/describe-character', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ photoBase64, mimeType: photoMime, name, age })
+      })
+      if (res.ok) {
+        const { description: desc } = await res.json()
+        setDescription(desc)
+      }
+    } catch {}
+    setAnalysing(false)
   }
 
   const valid = name.trim().length > 0
@@ -29,34 +85,35 @@ function CharacterForm({ initial, onSave, onCancel }) {
         <div
           onClick={() => fileRef.current.click()}
           style={{
-            width: 72, height: 72, borderRadius: '50%', cursor: 'pointer',
+            width: 80, height: 80, borderRadius: '50%', cursor: 'pointer',
             border: '2px dashed var(--border-strong)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             overflow: 'hidden', flexShrink: 0, transition: 'border-color 0.15s',
-            position: 'relative'
           }}
           onMouseEnter={e => e.currentTarget.style.borderColor = '#534AB7'}
           onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border-strong)'}
         >
           {photo
             ? <img src={photo} alt="character" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            : <span style={{ fontSize: 24, color: 'var(--text-muted)' }}>📷</span>
+            : <span style={{ fontSize: 28, color: 'var(--text-muted)' }}>📷</span>
           }
         </div>
         <input ref={fileRef} type="file" accept="image/*" onChange={handlePhoto} style={{ display: 'none' }} />
         <div style={{ flex: 1 }}>
           <p style={{ fontSize: 13, fontWeight: 500, marginBottom: 2 }}>Photo</p>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>Upload a photo to inspire the character's look in the story.</p>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+            Upload a clear photo — we'll analyse it to describe the character for the illustrator.
+          </p>
           <button onClick={() => fileRef.current.click()} style={{ fontSize: 12, color: '#534AB7', background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginTop: 4 }}>
             {photo ? 'Change photo' : 'Upload photo'}
           </button>
         </div>
       </div>
 
-      <Input label="Name *" value={name} onChange={setName} placeholder="e.g. Mia" />
+      <Input label="Name *" value={name} onChange={setName} placeholder="e.g. Beau" />
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        <Input label="Age" value={age} onChange={setAge} placeholder="e.g. 6" type="number" />
+        <Input label="Age" value={age} onChange={setAge} placeholder="e.g. 7" type="number" />
         <Input label="Role" value={role} onChange={setRole} placeholder="e.g. Hero, Sidekick" />
       </div>
 
@@ -64,37 +121,60 @@ function CharacterForm({ initial, onSave, onCancel }) {
         <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 8 }}>Personality</p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
           {PERSONALITIES.map(p => (
-            <button
-              key={p}
-              onClick={() => setPersonality(personality === p ? '' : p)}
-              style={{
-                padding: '5px 14px', borderRadius: 100, fontSize: 12, cursor: 'pointer',
-                border: '0.5px solid', transition: 'all 0.15s',
-                background: personality === p ? '#EEEDFE' : 'transparent',
-                borderColor: personality === p ? '#534AB7' : 'var(--border-strong)',
-                color: personality === p ? '#3C3489' : 'var(--text-secondary)',
-                fontWeight: personality === p ? 500 : 400
-              }}
-            >
-              {p}
-            </button>
+            <button key={p} onClick={() => setPersonality(personality === p ? '' : p)} style={{
+              padding: '5px 14px', borderRadius: 100, fontSize: 12, cursor: 'pointer',
+              border: '0.5px solid', transition: 'all 0.15s',
+              background: personality === p ? '#EEEDFE' : 'transparent',
+              borderColor: personality === p ? '#534AB7' : 'var(--border-strong)',
+              color: personality === p ? '#3C3489' : 'var(--text-secondary)',
+              fontWeight: personality === p ? 500 : 400
+            }}>{p}</button>
           ))}
         </div>
-        <input
-          value={personality && !PERSONALITIES.includes(personality) ? personality : ''}
-          onChange={e => setPersonality(e.target.value)}
-          placeholder="Or type your own…"
-          style={{
-            width: '100%', padding: '8px 12px', borderRadius: 8,
-            border: '0.5px solid var(--border)', background: 'var(--surface-input)',
-            fontSize: 13, fontFamily: 'inherit', color: 'var(--text-primary)', outline: 'none'
-          }}
-        />
+      </div>
+
+      {/* AI-generated appearance description */}
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)' }}>
+            Appearance description
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400, marginLeft: 6 }}>used to draw the character</span>
+          </p>
+          {photo && !analysing && (
+            <button onClick={handleAnalyse} style={{ fontSize: 12, color: '#534AB7', background: 'none', border: 'none', cursor: 'pointer' }}>
+              Re-analyse photo ↻
+            </button>
+          )}
+        </div>
+        {analysing ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'var(--surface-input)', borderRadius: 10, border: '0.5px solid var(--border)' }}>
+            <Spinner size={16} />
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Analysing photo…</span>
+          </div>
+        ) : (
+          <textarea
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            placeholder={photo ? 'Upload a photo and we\'ll fill this in automatically…' : 'e.g. A boy with short brown hair, blue eyes, and a wide smile…'}
+            rows={3}
+            style={{
+              width: '100%', padding: '10px 14px', borderRadius: 10,
+              border: '0.5px solid var(--border)', background: 'var(--surface-input)',
+              fontFamily: 'inherit', fontSize: 13, color: 'var(--text-primary)',
+              resize: 'none', lineHeight: 1.6, outline: 'none', boxSizing: 'border-box'
+            }}
+          />
+        )}
+        {description && (
+          <p style={{ fontSize: 11, color: '#1D9E75', marginTop: 5 }}>
+            ✓ Description ready — this will be used in every scene illustration
+          </p>
+        )}
       </div>
 
       <div style={{ display: 'flex', gap: 10 }}>
         <Button onClick={onCancel} variant="secondary" style={{ flex: 1 }}>Cancel</Button>
-        <Button onClick={() => valid && onSave({ name, age, personality, role, photo })} disabled={!valid} style={{ flex: 1 }}>
+        <Button onClick={() => valid && onSave({ name, age, personality, role, photo, photoBase64, photoMime, description })} disabled={!valid} style={{ flex: 1 }}>
           Save character
         </Button>
       </div>
@@ -152,6 +232,9 @@ export default function Characters() {
                 <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                   {[c.age && `Age ${c.age}`, c.role, c.personality].filter(Boolean).join(' · ')}
                 </p>
+                {c.description && (
+                  <p style={{ fontSize: 11, color: '#1D9E75', marginTop: 3 }}>✓ Appearance analysed</p>
+                )}
               </div>
               <button onClick={() => setEditing(c.id)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13 }}>Edit</button>
               <button onClick={() => deleteCharacter(c.id)} style={{ background: 'none', border: 'none', color: '#E24B4A', cursor: 'pointer', fontSize: 13 }}>Remove</button>

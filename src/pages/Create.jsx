@@ -83,10 +83,14 @@ export default function Create() {
       setGenStep(1)
       setGenDetail(`Story written — ${total} scenes ready. Now illustrating…`)
 
-      // Build character description string for image prompts
-      const charDesc = chosenChars.map(c =>
-        `${c.name}${c.age ? ` (age ${c.age})` : ''}${c.personality ? `, ${c.personality}` : ''}`
-      ).join(', ')
+      // Build rich character description for image prompts including AI-analysed appearance
+      const charDesc = chosenChars.map(c => {
+        const parts = [c.name]
+        if (c.age) parts.push(`age ${c.age}`)
+        if (c.description) parts.push(c.description)
+        else if (c.personality) parts.push(c.personality)
+        return parts.join(', ')
+      }).join(' | ')
 
       // Step 2: Generate images one at a time (avoid rate limits, update progress)
       for (let i = 0; i < scenes.length; i++) {
