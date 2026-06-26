@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useStore } from '../lib/store'
+import { getSfxForScene, playAmbientSfx, fadeOutAmbient, stopAmbientSfx } from '../lib/sfx'
 
 const STYLE_PROMPTS = {
   'Watercolour': "soft watercolour children's book illustration, painterly, gentle colours,",
@@ -177,7 +178,25 @@ export default function StoryPlayer() {
     return () => window.removeEventListener('keydown', handler)
   }, [goNext, goPrev, speaking, stopAudio, playNarration])
 
-  useEffect(() => { return () => stopAudio() }, [stopAudio])
+  // Play ambient SFX for current scene
+  useEffect(() => {
+    if (!current?.narration) return
+    const sfxUrl = getSfxForScene(current.narration)
+    if (sfxUrl) {
+      playAmbientSfx(sfxUrl, 0.12)
+    } else {
+      fadeOutAmbient()
+    }
+    return () => {}
+  }, [scene, current])
+
+  // Stop all audio on unmount
+  useEffect(() => {
+    return () => {
+      stopAudio()
+      stopAmbientSfx()
+    }
+  }, [stopAudio])
 
   if (!story) return (
     <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16, padding: 40 }}>
