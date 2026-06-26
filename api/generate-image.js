@@ -17,30 +17,46 @@ export default async function handler(req, res) {
   const prefix = stylePrefix[style] || 'children\'s book illustration, warm and magical,'
   const fullPrompt = `${prefix} ${imagePrompt}. No text or words in image. Child-safe, warm, magical, dreamlike, beautiful.`
 
-  // Pollinations AI - free, no key, works from Vercel
-  // Encode the prompt for URL
-  const encodedPrompt = encodeURIComponent(fullPrompt)
-  const seed = Math.floor(Math.random() * 999999)
-  const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&seed=${seed}&nologo=true&enhance=true`
-
   try {
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: { 'Accept': 'image/jpeg,image/png,image/*' }
-    })
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent?key=${process.env.GOOGLE_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{ text: fullPrompt }]
+          }],
+          generationConfig: {
+            responseModalities: ['IMAGE'],
+            responseMimeType: 'image/jpeg'
+          }
+        })
+      }
+    )
 
     if (!response.ok) {
-      console.error('Pollinations error:', response.status, await response.text())
-      return res.status(500).json({ error: `Image generation failed: ${response.status}` })
+      const err = await response.text()
+      console.error('Gemini error:', response.status, err)
+      return res.status(500).json({ error: `Image generation failed: ${response.status}`, detail: err })
     }
 
-    const arrayBuffer = await response.arrayBuffer()
-    const b64 = Buffer.from(arrayBuffer).toString('base64')
-    const contentType = response.headers.get('content-type') || 'image/jpeg'
+    const data = await response.json()
+
+    const parts = data?.candidates?.[0]?.content?.parts
+    const imagePart = parts?.find(p => p.inlineData)
+
+    if (!imagePart?.inlineData) {
+      console.error('No image in Gemini response:', JSON.stringify(data))
+      return res.status(500).json({ error: 'No image returned from Gemini' })
+    }
+
+    const b64 = imagePart.inlineData.data
+    const contentType = imagePart.inlineData.mimeType || 'image/jpeg'
 
     return res.status(200).json({ b64, contentType })
   } catch (err) {
-    console.error('Pollinations fetch error:', err)
+    console.error('Gemini fetch error:', err)
     res.status(500).json({ error: err.message })
   }
 }
