@@ -25,8 +25,9 @@ export default async function handler(req, res) {
 
 Your stories:
 - Are told in third person, present tense
-- Use short, musical sentences perfect for reading aloud
-- Build wonder and delight in every scene
+- Use VERY short, simple sentences — picture book level, age 3-6
+- Maximum 2-3 short sentences per scene. No long paragraphs.
+- Each sentence is punchy and vivid. Use sound words: "Whoosh!", "Splash!", "Oh!"
 - Always end happily and peacefully
 - Feel personal — the named characters are the true heroes
 
@@ -49,7 +50,7 @@ Return this exact JSON shape:
     {
       "sceneNumber": 1,
       "chapter": "Short evocative chapter/scene title",
-      "narration": "3-4 sentences of lyrical story narration. Use the characters' actual names. Make it vivid and read-aloud beautiful. End on a sense of wonder or warmth.",
+      "narration": "2-3 SHORT sentences only. Simple words. Picture book style for age 3-6. Use the character names. Make it fun and vivid.",
       "imagePrompt": "Detailed illustration prompt: ${visualStyle}. Describe the scene vividly — the characters (their approximate age and look), the setting, the lighting, the mood, the key action. Make it cinematic and beautiful. Do NOT include any text, letters, or words in the image description."
     }
   ]
