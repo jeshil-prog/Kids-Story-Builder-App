@@ -58,7 +58,13 @@ Return this exact JSON shape:
       "chapter": "Short exciting scene title (e.g. 'The Discovery', 'Setting Sail', 'The Hidden Cave')",
       "narration": "3-5 sentences telling this part of the story. Use character names. Include vivid details, emotions, and dialogue. Match the warm adventure tone of the example.",
       "imagePrompt": "Detailed illustration description: ${visualStyle}. Describe the scene — who is in it, what they look like, what they are doing, the setting, the lighting, the mood. Make it cinematic and beautiful. No text or words in the image.",
-      "sfx": "Pick ONE sound that best fits this scene from this exact list: ocean, waves, jungle, forest, birds, wind, rain, thunder, fire, magic, sparkle, space, adventure, mystery, night, underwater, cave, celebration, victory, happy. Every scene must have one."
+      "sfxCues": [
+        {
+          "triggerPhrase": "exact short phrase from the narration text that should trigger the sound (3-5 words)",
+          "sound": "one of: birds, wind, rain, thunder, fire, magic, ocean, jungle, footsteps, gasp, laugh, whoosh, sparkle, fanfare, splash, rustle, knock, creaking, growl, chime"
+        }
+      ]
+      Note: include 1-3 sfxCues per scene, placed at natural sound moments. triggerPhrase must be an exact substring of the narration.
     }
   ]
 }`

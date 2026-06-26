@@ -1,342 +1,409 @@
-// Browser-synthesised ambient sound effects using Web Audio API
-// No external files, no CDN, no blocking — works everywhere
+// One-shot sound effects triggered at specific moments during narration
+// All synthesised via Web Audio API — no external files needed
 
 let audioCtx = null
-let currentNodes = []
-let masterGain = null
 
 function getCtx() {
   if (!audioCtx || audioCtx.state === 'closed') {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)()
-    masterGain = audioCtx.createGain()
-    masterGain.gain.value = 0.18
-    masterGain.connect(audioCtx.destination)
   }
   if (audioCtx.state === 'suspended') audioCtx.resume()
   return audioCtx
 }
 
-function stopAll() {
-  currentNodes.forEach(n => { try { n.stop(); n.disconnect() } catch {} })
-  currentNodes = []
-}
-
-// Pink noise generator (used for ocean, wind, rain)
-function createNoise(ctx, type = 'pink') {
-  const bufferSize = ctx.sampleRate * 2
-  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
-  const data = buffer.getChannelData(0)
-  let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0
-  for (let i = 0; i < bufferSize; i++) {
-    const white = Math.random() * 2 - 1
-    if (type === 'pink') {
-      b0 = 0.99886*b0 + white*0.0555179
-      b1 = 0.99332*b1 + white*0.0750759
-      b2 = 0.96900*b2 + white*0.1538520
-      b3 = 0.86650*b3 + white*0.3104856
-      b4 = 0.55000*b4 + white*0.5329522
-      b5 = -0.7616*b5 - white*0.0168980
-      data[i] = (b0+b1+b2+b3+b4+b5+b6 + white*0.5362) * 0.11
-      b6 = white * 0.115926
-    } else {
-      data[i] = white * 0.5
-    }
-  }
-  const src = ctx.createBufferSource()
-  src.buffer = buffer
-  src.loop = true
-  return src
-}
-
-// Oscillator with LFO modulation
-function createOsc(ctx, freq, type = 'sine', lfoFreq = 0, lfoDepth = 0) {
-  const osc = ctx.createOscillator()
-  osc.type = type
-  osc.frequency.value = freq
-  if (lfoFreq > 0) {
-    const lfo = ctx.createOscillator()
-    const lfoGain = ctx.createGain()
-    lfo.frequency.value = lfoFreq
-    lfoGain.gain.value = lfoDepth
-    lfo.connect(lfoGain)
-    lfoGain.connect(osc.frequency)
-    lfo.start()
-    currentNodes.push(lfo)
-  }
-  return osc
-}
-
-// SOUND SYNTHESISERS
-
-function playOcean(ctx, out) {
-  // Pink noise filtered to sound like waves
-  const noise = createNoise(ctx, 'pink')
-  const filter = ctx.createBiquadFilter()
-  filter.type = 'bandpass'
-  filter.frequency.value = 400
-  filter.Q.value = 0.5
-
-  // LFO for wave rhythm
-  const lfo = ctx.createOscillator()
-  const lfoGain = ctx.createGain()
-  lfo.frequency.value = 0.15
-  lfoGain.gain.value = 0.4
-  const ampGain = ctx.createGain()
-  ampGain.gain.value = 0.6
-
-  lfo.connect(lfoGain)
-  lfoGain.connect(ampGain.gain)
-  noise.connect(filter)
-  filter.connect(ampGain)
-  ampGain.connect(out)
-
-  noise.start(); lfo.start()
-  currentNodes.push(noise, lfo)
-}
-
-function playJungle(ctx, out) {
-  // Low rumble + periodic bird-like chirps
-  const noise = createNoise(ctx, 'pink')
-  const filter = ctx.createBiquadFilter()
-  filter.type = 'lowpass'
-  filter.frequency.value = 300
-  const g = ctx.createGain(); g.gain.value = 0.3
-  noise.connect(filter); filter.connect(g); g.connect(out)
-  noise.start(); currentNodes.push(noise)
-
-  // Chirp pattern
-  function chirp() {
-    if (!audioCtx || audioCtx.state === 'closed') return
-    const osc = ctx.createOscillator()
-    const env = ctx.createGain()
-    osc.type = 'sine'
-    osc.frequency.setValueAtTime(2400 + Math.random()*800, ctx.currentTime)
-    osc.frequency.exponentialRampToValueAtTime(1800, ctx.currentTime + 0.08)
-    env.gain.setValueAtTime(0, ctx.currentTime)
-    env.gain.linearRampToValueAtTime(0.12, ctx.currentTime + 0.02)
-    env.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12)
-    osc.connect(env); env.connect(out)
-    osc.start(); osc.stop(ctx.currentTime + 0.15)
-    const delay = 0.8 + Math.random() * 2.5
-    setTimeout(chirp, delay * 1000)
-  }
-  setTimeout(chirp, 500)
-}
-
-function playMagic(ctx, out) {
-  // Shimmering high tones
-  const freqs = [523, 659, 784, 1047, 1319]
-  freqs.forEach((freq, i) => {
-    const osc = ctx.createOscillator()
-    const g = ctx.createGain()
-    osc.type = 'sine'
-    osc.frequency.value = freq
-    const lfo = ctx.createOscillator()
-    const lfoG = ctx.createGain()
-    lfo.frequency.value = 0.3 + i * 0.15
-    lfoG.gain.value = 0.04
-    lfo.connect(lfoG); lfoG.connect(g.gain)
-    g.gain.value = 0.06
-    osc.connect(g); g.connect(out)
-    osc.start(); lfo.start()
-    currentNodes.push(osc, lfo)
-  })
-  // Soft noise underneath
-  const noise = createNoise(ctx, 'pink')
-  const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 3000
-  const g2 = ctx.createGain(); g2.gain.value = 0.04
-  noise.connect(f); f.connect(g2); g2.connect(out)
-  noise.start(); currentNodes.push(noise)
-}
-
-function playSpace(ctx, out) {
-  // Deep drone with slow modulation
-  const freqs = [55, 82, 110]
-  freqs.forEach((freq, i) => {
-    const osc = ctx.createOscillator()
-    osc.type = 'sine'
-    osc.frequency.value = freq
-    const lfo = ctx.createOscillator()
-    const lfoG = ctx.createGain()
-    lfo.frequency.value = 0.05 + i * 0.03
-    lfoG.gain.value = 3
-    lfo.connect(lfoG); lfoG.connect(osc.frequency)
-    const g = ctx.createGain(); g.gain.value = 0.08
-    osc.connect(g); g.connect(out)
-    osc.start(); lfo.start()
-    currentNodes.push(osc, lfo)
-  })
-}
-
-function playNight(ctx, out) {
-  // Crickets + soft wind
-  const noise = createNoise(ctx, 'pink')
-  const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 200; f.Q.value = 0.3
-  const g = ctx.createGain(); g.gain.value = 0.15
-  noise.connect(f); f.connect(g); g.connect(out)
-  noise.start(); currentNodes.push(noise)
-
-  function cricket() {
-    if (!audioCtx || audioCtx.state === 'closed') return
-    for (let j = 0; j < 3; j++) {
-      setTimeout(() => {
-        const osc = ctx.createOscillator()
-        const env = ctx.createGain()
-        osc.frequency.value = 4200 + Math.random() * 200
-        osc.type = 'square'
-        env.gain.setValueAtTime(0.04, ctx.currentTime)
-        env.gain.setValueAtTime(0, ctx.currentTime + 0.06)
-        osc.connect(env); env.connect(out)
-        osc.start(); osc.stop(ctx.currentTime + 0.07)
-      }, j * 80)
-    }
-    setTimeout(cricket, 600 + Math.random() * 800)
-  }
-  setTimeout(cricket, 300)
-}
-
-function playWind(ctx, out) {
-  const noise = createNoise(ctx, 'pink')
-  const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 600; f.Q.value = 0.8
-  const lfo = ctx.createOscillator()
-  const lfoG = ctx.createGain()
-  lfo.frequency.value = 0.08; lfoG.gain.value = 0.35
-  const g = ctx.createGain(); g.gain.value = 0.5
-  lfo.connect(lfoG); lfoG.connect(g.gain)
-  noise.connect(f); f.connect(g); g.connect(out)
-  noise.start(); lfo.start(); currentNodes.push(noise, lfo)
-}
-
-function playRain(ctx, out) {
-  const noise = createNoise(ctx, 'white')
-  const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 1000
-  const g = ctx.createGain(); g.gain.value = 0.25
-  noise.connect(f); f.connect(g); g.connect(out)
-  noise.start(); currentNodes.push(noise)
-}
-
-function playCave(ctx, out) {
-  const noise = createNoise(ctx, 'pink')
-  const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 150
-  const g = ctx.createGain(); g.gain.value = 0.2
-  noise.connect(f); f.connect(g); g.connect(out)
-  noise.start(); currentNodes.push(noise)
-
-  const osc = ctx.createOscillator()
-  const og = ctx.createGain(); og.gain.value = 0.04
-  osc.frequency.value = 60; osc.type = 'sine'
-  osc.connect(og); og.connect(out); osc.start(); currentNodes.push(osc)
-}
-
-function playCelebration(ctx, out) {
-  const notes = [523, 659, 784, 1047]
-  notes.forEach((freq, i) => {
-    setTimeout(() => {
-      const osc = ctx.createOscillator()
-      const env = ctx.createGain()
-      osc.frequency.value = freq; osc.type = 'triangle'
-      env.gain.setValueAtTime(0.15, ctx.currentTime)
-      env.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4)
-      osc.connect(env); env.connect(out)
-      osc.start(); osc.stop(ctx.currentTime + 0.45)
-    }, i * 120)
-  })
-  // Then loop a gentle shimmer
-  setTimeout(() => playMagic(ctx, out), 600)
-}
-
-function playAdventure(ctx, out) {
-  // Heroic low drone
-  const freqs = [110, 165, 220]
-  freqs.forEach(freq => {
-    const osc = ctx.createOscillator()
-    osc.type = 'triangle'; osc.frequency.value = freq
-    const g = ctx.createGain(); g.gain.value = 0.06
-    osc.connect(g); g.connect(out); osc.start(); currentNodes.push(osc)
-  })
-  // Some wind underneath
-  playWind(ctx, out)
-}
-
-function playMystery(ctx, out) {
-  const freqs = [130, 174, 196]
-  freqs.forEach((freq, i) => {
-    const osc = ctx.createOscillator()
-    osc.type = 'sine'; osc.frequency.value = freq
-    const lfo = ctx.createOscillator()
-    const lfoG = ctx.createGain()
-    lfo.frequency.value = 0.1 + i*0.07; lfoG.gain.value = 0.05
-    lfo.connect(lfoG); lfoG.connect(osc.frequency)
-    const g = ctx.createGain(); g.gain.value = 0.07
-    osc.connect(g); g.connect(out); osc.start(); lfo.start()
-    currentNodes.push(osc, lfo)
-  })
-}
-
-const SYNTH_MAP = {
-  ocean: playOcean, waves: playOcean, underwater: playOcean,
-  jungle: playJungle, forest: playJungle, birds: playJungle,
-  magic: playMagic, sparkle: playMagic,
-  space: playSpace, night: playNight,
-  wind: playWind, rain: playRain, thunder: playWind,
-  fire: playWind, cave: playCave,
-  celebration: playCelebration, victory: playCelebration, happy: playCelebration,
-  adventure: playAdventure, mystery: playMystery,
-}
-
-const KEYWORD_MAP = [
-  { keywords: ['ocean','sea','beach','waves','shore','sailing','boat','fish','turtle','coral','swim','splash'], sfx: 'ocean' },
-  { keywords: ['jungle','forest','trees','vines','animals','wild','parrot','monkey'], sfx: 'jungle' },
-  { keywords: ['space','stars','rocket','galaxy','planet','astronaut','floating'], sfx: 'space' },
-  { keywords: ['magic','sparkle','glow','shimmer','wizard','spell','enchant','fairy','glowing','magical'], sfx: 'magic' },
-  { keywords: ['cave','dark','tunnel','underground','echo','dripping'], sfx: 'cave' },
-  { keywords: ['rain','storm','puddle','drizzle','thunder','lightning'], sfx: 'rain' },
-  { keywords: ['wind','breeze','blowing','gust'], sfx: 'wind' },
-  { keywords: ['night','moon','quiet','dark','sleep','dream','stars'], sfx: 'night' },
-  { keywords: ['treasure','found','hooray','cheered','celebrated','victory','discovery'], sfx: 'celebration' },
-  { keywords: ['mystery','secret','hidden','strange','clue','map','mysterious'], sfx: 'mystery' },
-  { keywords: ['adventure','journey','quest','explore'], sfx: 'adventure' },
-]
-
-export function getSfxForScene(scene) {
-  if (scene?.sfx && SYNTH_MAP[scene.sfx]) return scene.sfx
-  if (scene?.narration) {
-    const lower = scene.narration.toLowerCase()
-    for (const { keywords, sfx } of KEYWORD_MAP) {
-      if (keywords.some(k => lower.includes(k))) return sfx
-    }
-  }
-  return 'adventure'
-}
-
-export function playAmbientSfx(sfxKey) {
-  if (!sfxKey) return
+function playSound(fn) {
   try {
-    stopAll()
     const ctx = getCtx()
-    const synthFn = SYNTH_MAP[sfxKey]
-    if (synthFn) synthFn(ctx, masterGain)
+    fn(ctx)
   } catch (err) {
     console.error('SFX error:', err)
   }
 }
 
-export function stopAmbientSfx() {
-  stopAll()
-  if (masterGain) {
-    try { masterGain.disconnect() } catch {}
+// --- SOUND DEFINITIONS ---
+
+const SOUNDS = {
+  birds: (ctx) => {
+    // 3 quick chirps
+    [0, 0.18, 0.36].forEach(delay => {
+      const osc = ctx.createOscillator()
+      const env = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(2800 + Math.random()*400, ctx.currentTime + delay)
+      osc.frequency.exponentialRampToValueAtTime(2000, ctx.currentTime + delay + 0.1)
+      env.gain.setValueAtTime(0, ctx.currentTime + delay)
+      env.gain.linearRampToValueAtTime(0.3, ctx.currentTime + delay + 0.02)
+      env.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.12)
+      osc.connect(env)
+      env.connect(ctx.destination)
+      osc.start(ctx.currentTime + delay)
+      osc.stop(ctx.currentTime + delay + 0.15)
+    })
+  },
+
+  wind: (ctx) => {
+    const bufferSize = ctx.sampleRate * 1.5
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
+    const data = buffer.getChannelData(0)
+    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1
+    const src = ctx.createBufferSource()
+    src.buffer = buffer
+    const filter = ctx.createBiquadFilter()
+    filter.type = 'bandpass'
+    filter.frequency.value = 800
+    filter.Q.value = 0.5
+    const env = ctx.createGain()
+    env.gain.setValueAtTime(0, ctx.currentTime)
+    env.gain.linearRampToValueAtTime(0.3, ctx.currentTime + 0.3)
+    env.gain.linearRampToValueAtTime(0.2, ctx.currentTime + 0.9)
+    env.gain.linearRampToValueAtTime(0, ctx.currentTime + 1.5)
+    src.connect(filter); filter.connect(env); env.connect(ctx.destination)
+    src.start(); src.stop(ctx.currentTime + 1.5)
+  },
+
+  rain: (ctx) => {
+    const bufferSize = ctx.sampleRate * 2
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
+    const data = buffer.getChannelData(0)
+    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1
+    const src = ctx.createBufferSource()
+    src.buffer = buffer
+    const filter = ctx.createBiquadFilter()
+    filter.type = 'highpass'; filter.frequency.value = 2000
+    const env = ctx.createGain()
+    env.gain.setValueAtTime(0, ctx.currentTime)
+    env.gain.linearRampToValueAtTime(0.25, ctx.currentTime + 0.2)
+    env.gain.setValueAtTime(0.25, ctx.currentTime + 1.5)
+    env.gain.linearRampToValueAtTime(0, ctx.currentTime + 2)
+    src.connect(filter); filter.connect(env); env.connect(ctx.destination)
+    src.start(); src.stop(ctx.currentTime + 2)
+  },
+
+  thunder: (ctx) => {
+    const bufferSize = ctx.sampleRate * 2
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
+    const data = buffer.getChannelData(0)
+    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1
+    const src = ctx.createBufferSource()
+    src.buffer = buffer
+    const filter = ctx.createBiquadFilter()
+    filter.type = 'lowpass'; filter.frequency.value = 200
+    const env = ctx.createGain()
+    env.gain.setValueAtTime(0.8, ctx.currentTime)
+    env.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 2)
+    src.connect(filter); filter.connect(env); env.connect(ctx.destination)
+    src.start(); src.stop(ctx.currentTime + 2)
+  },
+
+  magic: (ctx) => {
+    // Ascending sparkle arpeggio
+    const notes = [523, 659, 784, 1047, 1319, 1568]
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator()
+      const env = ctx.createGain()
+      const t = ctx.currentTime + i * 0.07
+      osc.type = 'sine'; osc.frequency.value = freq
+      env.gain.setValueAtTime(0, t)
+      env.gain.linearRampToValueAtTime(0.2, t + 0.03)
+      env.gain.exponentialRampToValueAtTime(0.001, t + 0.25)
+      osc.connect(env); env.connect(ctx.destination)
+      osc.start(t); osc.stop(t + 0.3)
+    })
+  },
+
+  sparkle: (ctx) => {
+    // Short high shimmer
+    for (let i = 0; i < 5; i++) {
+      const osc = ctx.createOscillator()
+      const env = ctx.createGain()
+      const t = ctx.currentTime + i * 0.04
+      osc.type = 'sine'
+      osc.frequency.value = 2000 + Math.random() * 2000
+      env.gain.setValueAtTime(0.15, t)
+      env.gain.exponentialRampToValueAtTime(0.001, t + 0.15)
+      osc.connect(env); env.connect(ctx.destination)
+      osc.start(t); osc.stop(t + 0.18)
+    }
+  },
+
+  ocean: (ctx) => {
+    // Wave crash
+    const bufferSize = ctx.sampleRate * 2.5
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
+    const data = buffer.getChannelData(0)
+    let b = 0
+    for (let i = 0; i < bufferSize; i++) {
+      const white = Math.random() * 2 - 1
+      b = 0.98 * b + white * 0.02
+      data[i] = b
+    }
+    const src = ctx.createBufferSource()
+    src.buffer = buffer
+    const filter = ctx.createBiquadFilter()
+    filter.type = 'bandpass'; filter.frequency.value = 500; filter.Q.value = 0.3
+    const env = ctx.createGain()
+    env.gain.setValueAtTime(0, ctx.currentTime)
+    env.gain.linearRampToValueAtTime(0.5, ctx.currentTime + 0.4)
+    env.gain.linearRampToValueAtTime(0.3, ctx.currentTime + 1.2)
+    env.gain.linearRampToValueAtTime(0, ctx.currentTime + 2.5)
+    src.connect(filter); filter.connect(env); env.connect(ctx.destination)
+    src.start(); src.stop(ctx.currentTime + 2.5)
+  },
+
+  splash: (ctx) => {
+    const bufferSize = ctx.sampleRate * 0.8
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
+    const data = buffer.getChannelData(0)
+    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1
+    const src = ctx.createBufferSource()
+    src.buffer = buffer
+    const filter = ctx.createBiquadFilter()
+    filter.type = 'bandpass'; filter.frequency.value = 1500; filter.Q.value = 1
+    const env = ctx.createGain()
+    env.gain.setValueAtTime(0.4, ctx.currentTime)
+    env.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8)
+    src.connect(filter); filter.connect(env); env.connect(ctx.destination)
+    src.start(); src.stop(ctx.currentTime + 0.8)
+  },
+
+  jungle: (ctx) => {
+    // Monkey call + rustling
+    SOUNDS.rustle(ctx)
+    setTimeout(() => {
+      const osc = ctx.createOscillator()
+      const env = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(600, ctx.currentTime)
+      osc.frequency.exponentialRampToValueAtTime(300, ctx.currentTime + 0.3)
+      env.gain.setValueAtTime(0.2, ctx.currentTime)
+      env.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35)
+      osc.connect(env); env.connect(ctx.destination)
+      osc.start(); osc.stop(ctx.currentTime + 0.4)
+    }, 200)
+  },
+
+  footsteps: (ctx) => {
+    [0, 0.35, 0.7].forEach(delay => {
+      const bufferSize = Math.floor(ctx.sampleRate * 0.08)
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
+      const data = buffer.getChannelData(0)
+      for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i/bufferSize)
+      const src = ctx.createBufferSource()
+      src.buffer = buffer
+      const filter = ctx.createBiquadFilter()
+      filter.type = 'lowpass'; filter.frequency.value = 400
+      const env = ctx.createGain(); env.gain.value = 0.4
+      src.connect(filter); filter.connect(env); env.connect(ctx.destination)
+      src.start(ctx.currentTime + delay)
+    })
+  },
+
+  gasp: (ctx) => {
+    const osc = ctx.createOscillator()
+    const env = ctx.createGain()
+    osc.type = 'sine'
+    osc.frequency.setValueAtTime(300, ctx.currentTime)
+    osc.frequency.linearRampToValueAtTime(500, ctx.currentTime + 0.15)
+    env.gain.setValueAtTime(0, ctx.currentTime)
+    env.gain.linearRampToValueAtTime(0.2, ctx.currentTime + 0.05)
+    env.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2)
+    osc.connect(env); env.connect(ctx.destination)
+    osc.start(); osc.stop(ctx.currentTime + 0.25)
+  },
+
+  laugh: (ctx) => {
+    ['ha','ha','ha'].forEach((_, i) => {
+      const osc = ctx.createOscillator()
+      const env = ctx.createGain()
+      const t = ctx.currentTime + i * 0.15
+      osc.type = 'sine'
+      osc.frequency.value = 350 + i * 20
+      env.gain.setValueAtTime(0, t)
+      env.gain.linearRampToValueAtTime(0.15, t + 0.04)
+      env.gain.exponentialRampToValueAtTime(0.001, t + 0.12)
+      osc.connect(env); env.connect(ctx.destination)
+      osc.start(t); osc.stop(t + 0.15)
+    })
+  },
+
+  whoosh: (ctx) => {
+    const bufferSize = ctx.sampleRate * 0.6
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
+    const data = buffer.getChannelData(0)
+    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1
+    const src = ctx.createBufferSource()
+    src.buffer = buffer
+    const filter = ctx.createBiquadFilter()
+    filter.type = 'bandpass'
+    filter.frequency.setValueAtTime(200, ctx.currentTime)
+    filter.frequency.exponentialRampToValueAtTime(3000, ctx.currentTime + 0.3)
+    filter.frequency.exponentialRampToValueAtTime(200, ctx.currentTime + 0.6)
+    const env = ctx.createGain()
+    env.gain.setValueAtTime(0, ctx.currentTime)
+    env.gain.linearRampToValueAtTime(0.4, ctx.currentTime + 0.15)
+    env.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.6)
+    src.connect(filter); filter.connect(env); env.connect(ctx.destination)
+    src.start(); src.stop(ctx.currentTime + 0.6)
+  },
+
+  fanfare: (ctx) => {
+    const notes = [523, 659, 784, 1047]
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator()
+      const env = ctx.createGain()
+      const t = ctx.currentTime + i * 0.12
+      osc.type = 'triangle'; osc.frequency.value = freq
+      env.gain.setValueAtTime(0.2, t)
+      env.gain.exponentialRampToValueAtTime(0.001, t + 0.4)
+      osc.connect(env); env.connect(ctx.destination)
+      osc.start(t); osc.stop(t + 0.45)
+    })
+  },
+
+  rustle: (ctx) => {
+    const bufferSize = ctx.sampleRate * 0.5
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
+    const data = buffer.getChannelData(0)
+    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1
+    const src = ctx.createBufferSource()
+    src.buffer = buffer
+    const filter = ctx.createBiquadFilter()
+    filter.type = 'highpass'; filter.frequency.value = 3000
+    const env = ctx.createGain()
+    env.gain.setValueAtTime(0, ctx.currentTime)
+    env.gain.linearRampToValueAtTime(0.15, ctx.currentTime + 0.1)
+    env.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5)
+    src.connect(filter); filter.connect(env); env.connect(ctx.destination)
+    src.start(); src.stop(ctx.currentTime + 0.5)
+  },
+
+  knock: (ctx) => {
+    [0, 0.25].forEach(delay => {
+      const bufferSize = Math.floor(ctx.sampleRate * 0.06)
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
+      const data = buffer.getChannelData(0)
+      for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.3))
+      const src = ctx.createBufferSource()
+      src.buffer = buffer
+      const filter = ctx.createBiquadFilter()
+      filter.type = 'lowpass'; filter.frequency.value = 300
+      const env = ctx.createGain(); env.gain.value = 0.6
+      src.connect(filter); filter.connect(env); env.connect(ctx.destination)
+      src.start(ctx.currentTime + delay)
+    })
+  },
+
+  creaking: (ctx) => {
+    const osc = ctx.createOscillator()
+    const env = ctx.createGain()
+    osc.type = 'sawtooth'
+    osc.frequency.setValueAtTime(150, ctx.currentTime)
+    osc.frequency.linearRampToValueAtTime(80, ctx.currentTime + 0.8)
+    env.gain.setValueAtTime(0.15, ctx.currentTime)
+    env.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.9)
+    osc.connect(env); env.connect(ctx.destination)
+    osc.start(); osc.stop(ctx.currentTime + 0.9)
+  },
+
+  growl: (ctx) => {
+    const osc = ctx.createOscillator()
+    const env = ctx.createGain()
+    osc.type = 'sawtooth'; osc.frequency.value = 80
+    env.gain.setValueAtTime(0, ctx.currentTime)
+    env.gain.linearRampToValueAtTime(0.3, ctx.currentTime + 0.1)
+    env.gain.setValueAtTime(0.25, ctx.currentTime + 0.5)
+    env.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8)
+    osc.connect(env); env.connect(ctx.destination)
+    osc.start(); osc.stop(ctx.currentTime + 0.85)
+  },
+
+  chime: (ctx) => {
+    const freq = 880
+    const osc = ctx.createOscillator()
+    const env = ctx.createGain()
+    osc.type = 'sine'; osc.frequency.value = freq
+    env.gain.setValueAtTime(0.3, ctx.currentTime)
+    env.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.2)
+    osc.connect(env); env.connect(ctx.destination)
+    osc.start(); osc.stop(ctx.currentTime + 1.25)
+    // Add harmonic
+    const osc2 = ctx.createOscillator()
+    const env2 = ctx.createGain()
+    osc2.type = 'sine'; osc2.frequency.value = freq * 2.76
+    env2.gain.setValueAtTime(0.1, ctx.currentTime)
+    env2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8)
+    osc2.connect(env2); env2.connect(ctx.destination)
+    osc2.start(); osc2.stop(ctx.currentTime + 0.85)
+  },
+
+  fire: (ctx) => {
+    const bufferSize = ctx.sampleRate * 1.5
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
+    const data = buffer.getChannelData(0)
+    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1
+    const src = ctx.createBufferSource()
+    src.buffer = buffer
+    const filter = ctx.createBiquadFilter()
+    filter.type = 'bandpass'; filter.frequency.value = 600; filter.Q.value = 0.5
+    const env = ctx.createGain()
+    env.gain.setValueAtTime(0, ctx.currentTime)
+    env.gain.linearRampToValueAtTime(0.25, ctx.currentTime + 0.3)
+    env.gain.setValueAtTime(0.2, ctx.currentTime + 1.0)
+    env.gain.linearRampToValueAtTime(0, ctx.currentTime + 1.5)
+    src.connect(filter); filter.connect(env); env.connect(ctx.destination)
+    src.start(); src.stop(ctx.currentTime + 1.5)
   }
-  masterGain = null
+}
+
+// Play a one-shot sound effect by name
+export function playSfx(soundName) {
+  if (!soundName || !SOUNDS[soundName]) return
+  playSound(SOUNDS[soundName])
+}
+
+// Parse sfxCues from scene and return an array of {wordIndex, sound}
+// triggerPhrase is matched against the narration to find word position
+export function buildSfxTimeline(narration, sfxCues) {
+  if (!narration || !sfxCues?.length) return []
+  const words = narration.split(/\s+/)
+  const timeline = []
+
+  for (const cue of sfxCues) {
+    if (!cue.triggerPhrase || !cue.sound) continue
+    const phraseWords = cue.triggerPhrase.toLowerCase().split(/\s+/)
+    const firstWord = phraseWords[0]
+
+    // Find the word index where this phrase starts
+    for (let i = 0; i < words.length; i++) {
+      const clean = words[i].toLowerCase().replace(/[^a-z]/g, '')
+      if (clean === firstWord.replace(/[^a-z]/g, '')) {
+        // Verify next words match too
+        let match = true
+        for (let j = 1; j < Math.min(phraseWords.length, 3); j++) {
+          const nextClean = (words[i+j] || '').toLowerCase().replace(/[^a-z]/g, '')
+          if (nextClean !== phraseWords[j].replace(/[^a-z]/g, '')) {
+            match = false; break
+          }
+        }
+        if (match) {
+          timeline.push({ wordIndex: i, sound: cue.sound })
+          break
+        }
+      }
+    }
+  }
+
+  return timeline.sort((a, b) => a.wordIndex - b.wordIndex)
+}
+
+// Stop any ongoing audio context
+export function stopAmbientSfx() {
   if (audioCtx) {
     try { audioCtx.close() } catch {}
     audioCtx = null
   }
 }
 
-export function fadeOutAmbient(duration = 800) {
-  if (!masterGain || !audioCtx) return
-  const g = masterGain
-  g.gain.setValueAtTime(g.gain.value, audioCtx.currentTime)
-  g.gain.linearRampToValueAtTime(0, audioCtx.currentTime + duration / 1000)
-  setTimeout(() => stopAmbientSfx(), duration + 100)
-}
+export function playAmbientSfx() {}
+export function fadeOutAmbient() {}
+export function getSfxForScene() { return null }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useStore } from '../lib/store'
-import { getSfxForScene, playAmbientSfx, fadeOutAmbient, stopAmbientSfx } from '../lib/sfx'
+import { playSfx, buildSfxTimeline, stopAmbientSfx } from '../lib/sfx'
 
 const STYLE_PROMPTS = {
   'Watercolour': "soft watercolour children's book illustration, painterly, gentle colours,",
@@ -164,10 +164,27 @@ export default function StoryPlayer() {
       setLoadingAudio(false)
     }
 
-    // Fallback to browser TTS
+    // Fallback to browser TTS with SFX word boundary triggers
     if (window.speechSynthesis) {
       const u = new SpeechSynthesisUtterance(current.narration)
       u.rate = 0.88; u.pitch = 1.05
+
+      // Build SFX timeline from scene cues
+      const sfxTimeline = buildSfxTimeline(current.narration, current.sfxCues)
+      let sfxIdx = 0
+
+      u.onboundary = (e) => {
+        if (e.name !== 'word') return
+        // Count which word we're on
+        const textUpToHere = current.narration.slice(0, e.charIndex)
+        const wordCount = textUpToHere.split(/\s+/).filter(Boolean).length
+        // Fire any SFX cues that fall at or before this word
+        while (sfxIdx < sfxTimeline.length && sfxTimeline[sfxIdx].wordIndex <= wordCount) {
+          playSfx(sfxTimeline[sfxIdx].sound)
+          sfxIdx++
+        }
+      }
+
       u.onend = () => { setSpeaking(false); autoAdvanceRef.current = setTimeout(goNext, 1500) }
       setSpeaking(true)
       window.speechSynthesis.speak(u)
