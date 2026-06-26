@@ -41,14 +41,23 @@ export default function StoryPlayer() {
     if (speaking || loadingAudio || !current?.narration) return
     setLoadingAudio(true)
     try {
-      const res = await fetch('/api/generate-narration', {
+      const res = await fetch('https://api.openai.com/v1/audio/speech', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: current.narration })
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: 'tts-1',
+          input: current.narration,
+          voice: 'nova',
+          speed: 0.9
+        })
       })
       if (!res.ok) throw new Error('Narration failed')
-      const { b64 } = await res.json()
-      const audio = new Audio(`data:audio/mpeg;base64,${b64}`)
+      const audioBlob = await res.blob()
+      const audioUrl = URL.createObjectURL(audioBlob)
+      const audio = new Audio(audioUrl)
       audioRef.current = audio
       setLoadingAudio(false)
       setSpeaking(true)
