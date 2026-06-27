@@ -53,12 +53,29 @@ export default function StoryPlayer() {
     if (refPhoto) {
       setGenDetail('Creating character portrait…')
       try {
+        // Compress photo to max 512px before sending to avoid 413 errors
+        const compressedPhoto = await new Promise((resolve) => {
+          const img = new Image()
+          img.onload = () => {
+            const canvas = document.createElement('canvas')
+            const maxSize = 512
+            const ratio = Math.min(maxSize / img.width, maxSize / img.height, 1)
+            canvas.width = Math.round(img.width * ratio)
+            canvas.height = Math.round(img.height * ratio)
+            const ctx = canvas.getContext('2d')
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+            resolve(canvas.toDataURL('image/jpeg', 0.85).split(',')[1])
+          }
+          img.onerror = () => resolve(refPhoto)
+          img.src = `data:image/jpeg;base64,${refPhoto}`
+        })
+
         const portraitRes = await fetch(`${imageApiUrl}/generate-image`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'create-portrait',
-            photoBase64: refPhoto,
+            photoBase64: compressedPhoto,
             style: s.style
           })
         })

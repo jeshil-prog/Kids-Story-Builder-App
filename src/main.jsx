@@ -52,6 +52,19 @@ style.textContent = `
 `
 document.head.appendChild(style)
 
+// Clear any leftover image data from localStorage on startup
+try {
+  const keys = Object.keys(localStorage).filter(k => k.startsWith('sd_img_'))
+  // Keep only images from stories that still exist
+  const stories = JSON.parse(localStorage.getItem('sd_stories') || '[]')
+  const storyIds = new Set(stories.map(s => s.id))
+  keys.forEach(k => {
+    const parts = k.split('_')
+    const storyId = parts.slice(2, -1).join('_')
+    if (!storyIds.has(storyId)) localStorage.removeItem(k)
+  })
+} catch {}
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode><App /></React.StrictMode>
 )
