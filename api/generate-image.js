@@ -30,7 +30,7 @@ export default async function handler(req, res) {
     })
 
     const command = new InvokeModelCommand({
-      modelId: 'stability.stable-image-core-v1:0',
+      modelId: 'stability.stable-image-core-v1:1',
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify({
