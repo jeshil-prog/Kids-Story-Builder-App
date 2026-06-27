@@ -66,26 +66,30 @@ export default function StoryPlayer() {
           return parts.join(', ')
         }).join(' | ') || ''
 
-        // Use first character's photo as image-to-image reference if available
+        // Call Lambda via API Gateway — no Vercel timeout, runs up to 2 minutes
         const refPhoto = s.characters?.find(c => c.photoBase64)?.photoBase64 || null
-
-        const imgRes = await fetch('/api/generate-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            imagePrompt: scenes[i].imagePrompt || 'magical storybook scene',
-            style: s.style,
-            characterDescriptions: charDesc,
-            characterPhotoBase64: refPhoto
-          })
-        })
+        const imageApiUrl = import.meta.env.VITE_IMAGE_API_URL
 
         let b64 = null
-        if (imgRes.ok) {
-          const data = await imgRes.json()
-          b64 = data.b64
-        } else {
-          console.error(`Scene ${i+1} failed:`, imgRes.status, await imgRes.text())
+        try {
+          const imgRes = await fetch(`${imageApiUrl}/generate-image`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              imagePrompt: scenes[i].imagePrompt || 'magical storybook scene',
+              style: s.style,
+              characterDescriptions: charDesc,
+              characterPhotoBase64: refPhoto
+            })
+          })
+          if (imgRes.ok) {
+            const data = await imgRes.json()
+            b64 = data.b64
+          } else {
+            console.error(`Scene ${i+1} failed:`, imgRes.status, await imgRes.text())
+          }
+        } catch (err) {
+          console.error(`Scene ${i+1} error:`, err.message)
         }
 
         if (b64) {

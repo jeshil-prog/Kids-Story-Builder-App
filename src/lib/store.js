@@ -67,13 +67,13 @@ export const useStore = create((set, get) => ({
 
   addCharacter: (char) => {
     const next = [...get().characters, { ...char, id: uuidv4() }]
-    set({ characters: next })
-    saveCharacters(next)
+    set({ characters: next })  // keep photoBase64 in memory
+    saveCharacters(next)       // strips photoBase64 for localStorage
   },
   updateCharacter: (id, patch) => {
     const next = get().characters.map(c => c.id === id ? { ...c, ...patch } : c)
-    set({ characters: next })
-    saveCharacters(next)
+    set({ characters: next })  // keep photoBase64 in memory
+    saveCharacters(next)       // strips photoBase64 for localStorage
   },
   deleteCharacter: (id) => {
     const next = get().characters.filter(c => c.id !== id)

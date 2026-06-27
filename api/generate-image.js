@@ -5,7 +5,7 @@ export const config = { maxDuration: 60 }
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  const { imagePrompt, style, characterDescriptions } = req.body
+  const { imagePrompt, style, characterDescriptions, characterPhotoBase64 } = req.body
 
   const stylePrefix = {
     'Watercolour': "soft watercolour children's book illustration, painterly, gentle washes of colour,",
@@ -19,6 +19,7 @@ export default async function handler(req, res) {
   const prefix = stylePrefix[style] || "children's book illustration, warm and magical,"
   const charNote = characterDescriptions ? `Characters: ${characterDescriptions}. ` : ''
   const fullPrompt = `${prefix} ${charNote}${imagePrompt}. No text or words in image. Child-safe, warm, magical, beautiful.`
+  const negativePrompt = 'text, words, letters, watermark, ugly, blurry, dark, violent, scary, adult content'
 
   try {
     const client = new BedrockRuntimeClient({
@@ -29,16 +30,29 @@ export default async function handler(req, res) {
       }
     })
 
+    // Use image-to-image if we have a character photo reference
+    const requestBody = characterPhotoBase64
+      ? {
+          prompt: fullPrompt,
+          negative_prompt: negativePrompt,
+          image: characterPhotoBase64,
+          strength: 0.65, // 0=identical to photo, 1=ignore photo. 0.65 = keep likeness, allow scene freedom
+          mode: 'image-to-image',
+          output_format: 'jpeg'
+        }
+      : {
+          prompt: fullPrompt,
+          negative_prompt: negativePrompt,
+          aspect_ratio: '1:1',
+          mode: 'text-to-image',
+          output_format: 'jpeg'
+        }
+
     const command = new InvokeModelCommand({
-      modelId: 'stability.stable-image-core-v1:1',
+      modelId: 'stability.sd3-5-large-v1:0',
       contentType: 'application/json',
       accept: 'application/json',
-      body: JSON.stringify({
-        prompt: fullPrompt,
-        negative_prompt: 'text, words, letters, watermark, ugly, blurry, dark, violent, scary',
-        aspect_ratio: '1:1',
-        output_format: 'jpeg'
-      })
+      body: JSON.stringify(requestBody)
     })
 
     const response = await client.send(command)

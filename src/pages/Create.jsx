@@ -78,12 +78,15 @@ export default function Create() {
         return parts.join(', ')
       }).join(' | ')
 
+      // Keep photoBase64 on characters so StoryPlayer can use image-to-image
+      const charsWithPhotos = chosenChars
+
       const fullStory = {
         id,
         title: story.title,
         tagline: story.tagline,
         genre, style, length,
-        characters: chosenChars,
+        characters: charsWithPhotos,
         charDesc,
         scenes: story.scenes,
         createdAt: Date.now(),
