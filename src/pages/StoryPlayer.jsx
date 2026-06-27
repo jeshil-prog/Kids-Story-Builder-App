@@ -66,13 +66,17 @@ export default function StoryPlayer() {
           return parts.join(', ')
         }).join(' | ') || ''
 
+        // Use first character's photo as image-to-image reference if available
+        const refPhoto = s.characters?.find(c => c.photoBase64)?.photoBase64 || null
+
         const imgRes = await fetch('/api/generate-image', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             imagePrompt: scenes[i].imagePrompt || 'magical storybook scene',
             style: s.style,
-            characterDescriptions: charDesc
+            characterDescriptions: charDesc,
+            characterPhotoBase64: refPhoto
           })
         })
 
@@ -145,9 +149,28 @@ export default function StoryPlayer() {
           audioRef.current = audio
           setLoadingAudio(false)
           setSpeaking(true)
+
+          // Fire SFX at timed intervals during OpenAI TTS playback
+          const sfxTimeline = buildSfxTimeline(current.narration, current.sfxCues)
+          const wordsPerSecond = 2.5 * 0.9 // OpenAI TTS speed 0.9
+          const sfxTimers = []
+          sfxTimeline.forEach(cue => {
+            const delayMs = (cue.wordIndex / wordsPerSecond) * 1000
+            const timer = setTimeout(() => playSfx(cue.sound), delayMs)
+            sfxTimers.push(timer)
+          })
+
           audio.play()
-          audio.onended = () => { setSpeaking(false); autoAdvanceRef.current = setTimeout(goNext, 1500) }
-          audio.onerror = () => { setSpeaking(false); setLoadingAudio(false) }
+          audio.onended = () => {
+            sfxTimers.forEach(t => clearTimeout(t))
+            setSpeaking(false)
+            autoAdvanceRef.current = setTimeout(goNext, 1500)
+          }
+          audio.onerror = () => {
+            sfxTimers.forEach(t => clearTimeout(t))
+            setSpeaking(false)
+            setLoadingAudio(false)
+          }
           return
         }
       } catch {}
