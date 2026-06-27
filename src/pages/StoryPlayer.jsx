@@ -50,48 +50,38 @@ export default function StoryPlayer() {
     for (let i = 0; i < total; i++) {
       setImageProgress(i)
       try {
-        // Step 1: Submit job to fal.ai queue (fast, < 2s)
-        const submitRes = await fetch('/api/generate-image-job', {
+        // Call Bedrock via server API (AWS credentials stay server-side)
+        const stylePrefix = {
+          'Watercolour': "soft watercolour children's book illustration, painterly,",
+          'Pixar-like': 'Pixar 3D animation style, warm cinematic lighting, expressive,',
+          'Storybook': "classic storybook illustration, hand-painted, warm,",
+          'Comic book': 'bold comic book illustration, clean linework, vivid colours,',
+          'Anime': 'Studio Ghibli anime style, detailed painterly backgrounds,',
+          'Claymation': 'claymation stop-motion style, tactile textures, whimsical,'
+        }
+        const charDesc = s.characters?.map(c => {
+          const parts = [c.name]
+          if (c.age) parts.push(`age ${c.age}`)
+          if (c.description) parts.push(c.description)
+          return parts.join(', ')
+        }).join(' | ') || ''
+
+        const imgRes = await fetch('/api/generate-image', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             imagePrompt: scenes[i].imagePrompt || 'magical storybook scene',
             style: s.style,
-            characterPhotoUrl
+            characterDescriptions: charDesc
           })
         })
 
-        if (!submitRes.ok) {
-          console.error(`Scene ${i+1} submit failed:`, submitRes.status)
-          continue
-        }
-
-        const { request_id } = await submitRes.json()
-
-        // Step 2: Poll until complete (from browser, no timeout)
         let b64 = null
-        let attempts = 0
-        while (attempts < 60 && !b64) {
-          await new Promise(r => setTimeout(r, 3000))
-          attempts++
-          try {
-            const checkRes = await fetch('/api/check-image-job', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ request_id })
-            })
-            if (checkRes.ok) {
-              const data = await checkRes.json()
-              if (data.status === 'COMPLETED' && data.b64) {
-                b64 = data.b64
-              } else if (data.status === 'FAILED') {
-                console.error(`Scene ${i+1} generation failed`)
-                break
-              }
-            }
-          } catch (pollErr) {
-            console.error('Poll error:', pollErr)
-          }
+        if (imgRes.ok) {
+          const data = await imgRes.json()
+          b64 = data.b64
+        } else {
+          console.error(`Scene ${i+1} failed:`, imgRes.status, await imgRes.text())
         }
 
         if (b64) {
