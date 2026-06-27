@@ -57,7 +57,7 @@ Return this exact JSON shape:
       "sceneNumber": 1,
       "chapter": "Short exciting scene title (e.g. 'The Discovery', 'Setting Sail', 'The Hidden Cave')",
       "narration": "3-5 sentences telling this part of the story. Use character names. Include vivid details, emotions, and dialogue. Match the warm adventure tone of the example.",
-      "imagePrompt": "Detailed illustration description: ${visualStyle}. Describe the scene — who is in it, what they look like, what they are doing, the setting, the lighting, the mood. Make it cinematic and beautiful. No text or words in the image.",
+      "imagePrompt": "WIDE ESTABLISHING SHOT for a ${visualStyle} children's picture book page. Describe the full environment and setting in rich detail — landscape, sky, water, forest, buildings, magical elements. The character is visible but the scene fills the frame. Include: what the environment looks like, time of day, weather/lighting, magical elements, colours, mood. Example format: 'Wide shot of a moonlit ocean at night with glowing waves. A child in pyjamas sits on a floating wooden bed in the middle of the sea. Giant friendly whales surface around the bed. Bioluminescent fish glow beneath the water. Star-filled sky above. Warm magical light. Vast epic scene.'",
       "sfxCues": [
         {
           "triggerPhrase": "exact short phrase from the narration text that should trigger the sound (3-5 words)",
