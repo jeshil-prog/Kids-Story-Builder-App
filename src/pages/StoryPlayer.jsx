@@ -192,18 +192,6 @@ export default function StoryPlayer() {
     return () => window.removeEventListener('keydown', handler)
   }, [goNext, goPrev, speaking, stopAudio, playNarration])
 
-  // Play ambient SFX for current scene
-  useEffect(() => {
-    if (!current?.narration) return
-    const sfxUrl = getSfxForScene(current)
-    if (sfxUrl) {
-      playAmbientSfx(sfxUrl, 0.12)
-    } else {
-      fadeOutAmbient()
-    }
-    return () => {}
-  }, [scene, current])
-
   // Stop all audio on unmount
   useEffect(() => {
     return () => {

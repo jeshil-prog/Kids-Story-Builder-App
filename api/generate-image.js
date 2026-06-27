@@ -25,7 +25,7 @@ export default async function handler(req, res) {
     const accessKey = process.env.AWS_ACCESS_KEY_ID
     const secretKey = process.env.AWS_SECRET_ACCESS_KEY
     const modelId = 'stability.stable-image-core-v1:0'
-    const endpoint = `https://bedrock-runtime.${region}.amazonaws.com/model/${encodeURIComponent(modelId)}/invoke`
+    const endpoint = `https://bedrock-runtime.${region}.amazonaws.com/model/${modelId}/invoke`
 
     const body = JSON.stringify({
       prompt: fullPrompt,
@@ -47,7 +47,7 @@ export default async function handler(req, res) {
     const signedHeaders = 'content-type;host;x-amz-date'
     const canonicalRequest = [
       'POST',
-      `/model/${encodeURIComponent(modelId)}/invoke`,
+      `/model/${modelId}/invoke`,
       '',
       canonicalHeaders,
       signedHeaders,
