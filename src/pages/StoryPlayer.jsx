@@ -22,6 +22,7 @@ export default function StoryPlayer() {
   const [speaking, setSpeaking] = useState(false)
   const [loadingAudio, setLoadingAudio] = useState(false)
   const [generatingImages, setGeneratingImages] = useState(false)
+  const [genDetail, setGenDetail] = useState('')
   const [imageProgress, setImageProgress] = useState(0)
   const audioRef = useRef(null)
   const autoAdvanceRef = useRef(null)
@@ -43,10 +44,37 @@ export default function StoryPlayer() {
 
     const scenes = [...s.scenes]
     const total = scenes.length
+    const imageApiUrl = import.meta.env.VITE_IMAGE_API_URL
 
-    // Get character photo URL from first character (if available)
-    const characterPhotoUrl = s.characters?.[0]?.photoUrl || null
+    // Step 1: Create canonical portrait from character photo (identity anchor)
+    let canonicalPortrait = null
+    const refPhoto = s.characters?.find(c => c.photoBase64)?.photoBase64 || null
 
+    if (refPhoto) {
+      setGenDetail('Creating character portrait…')
+      try {
+        const portraitRes = await fetch(`${imageApiUrl}/generate-image`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'create-portrait',
+            photoBase64: refPhoto,
+            style: s.style
+          })
+        })
+        if (portraitRes.ok) {
+          const data = await portraitRes.json()
+          canonicalPortrait = data.b64
+          console.log('Canonical portrait created successfully')
+        } else {
+          console.error('Portrait creation failed:', await portraitRes.text())
+        }
+      } catch (err) {
+        console.error('Portrait creation error:', err.message)
+      }
+    }
+
+    // Step 2: Generate each scene using canonical portrait as identity anchor
     for (let i = 0; i < total; i++) {
       setImageProgress(i)
       try {
@@ -66,20 +94,18 @@ export default function StoryPlayer() {
           return parts.join(', ')
         }).join(' | ') || ''
 
-        // Call Lambda via API Gateway — no Vercel timeout, runs up to 2 minutes
-        const refPhoto = s.characters?.find(c => c.photoBase64)?.photoBase64 || null
-        const imageApiUrl = import.meta.env.VITE_IMAGE_API_URL
-
+        // Two-step identity-locked generation
         let b64 = null
         try {
           const imgRes = await fetch(`${imageApiUrl}/generate-image`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+              action: canonicalPortrait ? 'generate-scene' : 'fallback',
+              portraitBase64: canonicalPortrait,
               imagePrompt: scenes[i].imagePrompt || 'magical storybook scene',
               style: s.style,
-              characterDescriptions: charDesc,
-              characterPhotoBase64: refPhoto
+              cameraAngle: 'medium wide shot, character in environment, storybook scene'
             })
           })
           if (imgRes.ok) {
