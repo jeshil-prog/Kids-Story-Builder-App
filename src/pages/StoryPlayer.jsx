@@ -163,19 +163,25 @@ export default function StoryPlayer() {
       const sfxTimeline = buildSfxTimeline(current.narration, current.sfxCues)
       let sfxIdx = 0
 
-      u.onboundary = (e) => {
-        if (e.name !== 'word') return
-        // Count which word we're on
-        const textUpToHere = current.narration.slice(0, e.charIndex)
-        const wordCount = textUpToHere.split(/\s+/).filter(Boolean).length
-        // Fire any SFX cues that fall at or before this word
-        while (sfxIdx < sfxTimeline.length && sfxTimeline[sfxIdx].wordIndex <= wordCount) {
-          playSfx(sfxTimeline[sfxIdx].sound)
-          sfxIdx++
-        }
-      }
+      // Time-based SFX — fire sounds at estimated word times
+      // Average speaking rate ~2.5 words/second at rate 0.88
+      const wordsPerSecond = 2.5 * 0.88
+      const sfxTimers = []
+      sfxTimeline.forEach(cue => {
+        const delayMs = (cue.wordIndex / wordsPerSecond) * 1000
+        const timer = setTimeout(() => playSfx(cue.sound), delayMs)
+        sfxTimers.push(timer)
+      })
 
-      u.onend = () => { setSpeaking(false); autoAdvanceRef.current = setTimeout(goNext, 1500) }
+      u.onend = () => {
+        sfxTimers.forEach(t => clearTimeout(t))
+        setSpeaking(false)
+        autoAdvanceRef.current = setTimeout(goNext, 1500)
+      }
+      u.onerror = () => {
+        sfxTimers.forEach(t => clearTimeout(t))
+        setSpeaking(false)
+      }
       setSpeaking(true)
       window.speechSynthesis.speak(u)
     }

@@ -78,28 +78,9 @@ function CharacterForm({ initial, onSave, onCancel }) {
 
   const valid = name.trim().length > 0
 
-  const handleSave = async () => {
+  const handleSave = () => {
     if (!valid) return
-    let photoUrl = initial?.photoUrl || null
-
-    // Upload photo to fal.ai storage if we have a new photo
-    if (photoBase64 && photoBase64 !== initial?.photoBase64) {
-      try {
-        const res = await fetch('/api/upload-photo', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ base64: photoBase64, mimeType: photoMime })
-        })
-        if (res.ok) {
-          const data = await res.json()
-          photoUrl = data.url
-        }
-      } catch (err) {
-        console.error('Photo upload failed:', err)
-      }
-    }
-
-    onSave({ name, age, personality, role, photo, photoBase64, photoMime, photoUrl, description })
+    onSave({ name, age, personality, role, photo, photoBase64, photoMime, description })
   }
 
   return (
