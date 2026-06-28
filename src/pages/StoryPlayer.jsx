@@ -87,24 +87,8 @@ export default function StoryPlayer() {
             console.log('Character description extracted:', characterDescription)
           }
 
-          // Crop portrait to face-only (top 60% of image) to prevent
-          // background/pose composition being copied into scenes
-          if (data.b64) {
-            canonicalPortrait = await new Promise((resolve) => {
-              const img = new Image()
-              img.onload = () => {
-                const canvas = document.createElement('canvas')
-                canvas.width = img.width
-                canvas.height = Math.round(img.height * 0.6)
-                const ctx = canvas.getContext('2d')
-                ctx.drawImage(img, 0, 0)
-                resolve(canvas.toDataURL('image/jpeg', 0.9).split(',')[1])
-              }
-              img.onerror = () => resolve(data.b64)
-              img.src = `data:image/jpeg;base64,${data.b64}`
-            })
-          }
-          console.log('Canonical portrait created and cropped to face')
+          if (data.b64) canonicalPortrait = data.b64
+          console.log('Canonical portrait created successfully')
         } else {
           console.error('Portrait creation failed:', await portraitRes.text())
         }
