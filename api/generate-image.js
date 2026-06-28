@@ -17,7 +17,6 @@ export default async function handler(req, res) {
   const styleDesc = STYLE_PROMPTS[style] || "children's book illustration, warm and magical"
   const namedChars = (characters || []).filter(c => c.name)
   const charsWithPhotos = namedChars.filter(c => c.photo)
-
   const charNames = namedChars.map(c => c.name).join(', ')
 
   const fullPrompt = `${styleDesc} children's picture book full-page illustration.
@@ -33,53 +32,34 @@ STYLE RULES: Wide cinematic composition. Rich detailed environment. Characters i
     let b64
 
     if (charsWithPhotos.length > 0) {
-      // Use the edits endpoint — accepts reference images for character likeness
-      // Convert base64 data URLs to Buffers for multipart form upload
-      const FormData = (await import('node:stream')).PassThrough
-      
-      // Build multipart form manually since we can't use the SDK
-      const boundary = `----FormBoundary${Math.random().toString(36).slice(2)}`
-      const parts = []
+      // Use edits endpoint with reference photos via multipart form
+      const formData = new FormData()
+      formData.append('model', 'gpt-image-1.5')
+      formData.append('prompt', fullPrompt)
+      formData.append('n', '1')
+      formData.append('size', '1024x1024')
 
-      // Add each character photo as a reference image
       for (let i = 0; i < charsWithPhotos.length; i++) {
         const char = charsWithPhotos[i]
         const matches = char.photo.match(/^data:(.+);base64,(.+)$/)
         if (!matches) continue
         const [, mediaType, b64Data] = matches
         const ext = mediaType.split('/')[1] || 'png'
-        const imgBuffer = Buffer.from(b64Data, 'base64')
-
-        parts.push(
-          `--${boundary}\r\nContent-Disposition: form-data; name="image[]"; filename="char${i}.${ext}"\r\nContent-Type: ${mediaType}\r\n\r\n`,
-          imgBuffer,
-          '\r\n'
-        )
+        const bytes = Uint8Array.from(atob(b64Data), c => c.charCodeAt(0))
+        const blob = new Blob([bytes], { type: mediaType })
+        formData.append('image[]', blob, `char${i}.${ext}`)
       }
-
-      // Add remaining fields
-      const fields = { model: 'gpt-image-1.5', prompt: fullPrompt, n: '1', size: '1024x1024' }
-      for (const [key, val] of Object.entries(fields)) {
-        parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${val}\r\n`)
-      }
-      parts.push(`--${boundary}--\r\n`)
-
-      const bodyParts = parts.map(p => typeof p === 'string' ? Buffer.from(p) : p)
-      const body = Buffer.concat(bodyParts)
 
       const response = await fetch('https://api.openai.com/v1/images/edits', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-          'Content-Type': `multipart/form-data; boundary=${boundary}`
-        },
-        body
+        headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}` },
+        body: formData
       })
 
       if (!response.ok) {
         const err = await response.text()
         console.error('OpenAI edits error:', err)
-        // Fall back to text-only generation
+        // Fall back to text-only
         b64 = await generateTextOnly(fullPrompt)
       } else {
         const data = await response.json()
@@ -87,7 +67,6 @@ STYLE RULES: Wide cinematic composition. Rich detailed environment. Characters i
       }
 
     } else {
-      // No photos — straight text-to-image
       b64 = await generateTextOnly(fullPrompt)
     }
 
@@ -119,7 +98,7 @@ async function generateTextOnly(prompt) {
 
   if (!response.ok) {
     const err = await response.text()
-    throw new Error(`OpenAI generations error: ${err}`)
+    throw new Error(`OpenAI error: ${err}`)
   }
 
   const data = await response.json()
