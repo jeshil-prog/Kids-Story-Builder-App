@@ -48,10 +48,11 @@ export default function StoryPlayer() {
 
     // Step 1: Create canonical portrait from character photo (identity anchor)
     let canonicalPortrait = null
+    let characterDescription = s.charDesc || null
     const refPhoto = s.characters?.find(c => c.photoBase64)?.photoBase64 || null
 
     if (refPhoto) {
-      setGenDetail('Creating character portrait…')
+      setGenDetail('Analysing character and creating portrait…')
       try {
         // Compress photo to max 512px before sending to avoid 413 errors
         const compressedPhoto = await new Promise((resolve) => {
@@ -81,8 +82,29 @@ export default function StoryPlayer() {
         })
         if (portraitRes.ok) {
           const data = await portraitRes.json()
-          canonicalPortrait = data.b64
-          console.log('Canonical portrait created successfully')
+          if (data.characterDescription) {
+            characterDescription = data.characterDescription
+            console.log('Character description extracted:', characterDescription)
+          }
+
+          // Crop portrait to face-only (top 60% of image) to prevent
+          // background/pose composition being copied into scenes
+          if (data.b64) {
+            canonicalPortrait = await new Promise((resolve) => {
+              const img = new Image()
+              img.onload = () => {
+                const canvas = document.createElement('canvas')
+                canvas.width = img.width
+                canvas.height = Math.round(img.height * 0.6)
+                const ctx = canvas.getContext('2d')
+                ctx.drawImage(img, 0, 0)
+                resolve(canvas.toDataURL('image/jpeg', 0.9).split(',')[1])
+              }
+              img.onerror = () => resolve(data.b64)
+              img.src = `data:image/jpeg;base64,${data.b64}`
+            })
+          }
+          console.log('Canonical portrait created and cropped to face')
         } else {
           console.error('Portrait creation failed:', await portraitRes.text())
         }
@@ -120,9 +142,9 @@ export default function StoryPlayer() {
             body: JSON.stringify({
               action: canonicalPortrait ? 'generate-scene' : 'fallback',
               portraitBase64: canonicalPortrait,
+              characterDescription,
               imagePrompt: scenes[i].imagePrompt || 'magical storybook scene',
-              style: s.style,
-              cameraAngle: 'medium wide shot, character in environment, storybook scene'
+              style: s.style
             })
           })
           if (imgRes.ok) {
