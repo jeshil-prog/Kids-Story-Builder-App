@@ -1,72 +1,127 @@
-import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime'
-
 export const config = { maxDuration: 60 }
+
+const STYLE_PROMPTS = {
+  'Watercolour': 'soft watercolour children\'s book illustration, painterly brushstrokes, gentle washes of colour, storybook art',
+  'Pixar-like': 'Pixar 3D animation style, warm cinematic lighting, expressive stylised characters, highly detailed environments',
+  'Storybook': 'classic fairy tale storybook illustration, hand-painted, warm golden tones, whimsical detailed scenes',
+  'Comic book': 'bold comic book illustration, clean linework, vivid saturated colours, dynamic composition',
+  'Anime': 'Studio Ghibli anime style, soft warm lighting, expressive characters, lush detailed painterly backgrounds',
+  'Claymation': 'Laika studio claymation style, tactile clay textures, bright cheerful colours, stop-motion aesthetic'
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  const { imagePrompt, style, characterDescriptions, characterPhotoBase64 } = req.body
+  const { imagePrompt, style, characters } = req.body
 
-  const stylePrefix = {
-    'Watercolour': "soft watercolour children's book illustration, painterly, gentle washes of colour,",
-    'Pixar-like': 'Pixar 3D animation style, warm cinematic lighting, expressive cute characters, highly detailed,',
-    'Storybook': "classic fairy tale storybook illustration, hand-painted, warm golden light,",
-    'Comic book': 'bold comic book illustration, clean linework, bright vivid colours, dynamic composition,',
-    'Anime': 'Studio Ghibli anime style, detailed painterly backgrounds, soft warm lighting,',
-    'Claymation': 'claymation stop-motion style, tactile textures, warm whimsical, colourful,'
-  }
+  const styleDesc = STYLE_PROMPTS[style] || "children's book illustration, warm and magical"
+  const namedChars = (characters || []).filter(c => c.name)
+  const charsWithPhotos = namedChars.filter(c => c.photo)
 
-  const prefix = stylePrefix[style] || "children's book illustration, warm and magical,"
-  const charNote = characterDescriptions ? `Characters: ${characterDescriptions}. ` : ''
-  const fullPrompt = `${prefix} ${charNote}${imagePrompt}. No text or words in image. Child-safe, warm, magical, beautiful.`
-  const negativePrompt = 'text, words, letters, watermark, ugly, blurry, dark, violent, scary, adult content'
+  const charNames = namedChars.map(c => c.name).join(', ')
+
+  const fullPrompt = `${styleDesc} children's picture book full-page illustration.
+
+THE SCENE:
+${imagePrompt}
+
+${charNames ? `CHARACTERS IN THIS SCENE: ${charNames}. Preserve their exact appearance — same skin tone, hair colour, hair style, face shape, and ethnicity. Do not alter any features.` : ''}
+
+STYLE RULES: Wide cinematic composition. Rich detailed environment. Characters integrated naturally into the scene. Warm, joyful, magical atmosphere. No text or words in the image. Child-safe.`
 
   try {
-    const client = new BedrockRuntimeClient({
-      region: process.env.AWS_REGION || 'us-west-2',
-      credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    let b64
+
+    if (charsWithPhotos.length > 0) {
+      // Use the edits endpoint — accepts reference images for character likeness
+      // Convert base64 data URLs to Buffers for multipart form upload
+      const FormData = (await import('node:stream')).PassThrough
+      
+      // Build multipart form manually since we can't use the SDK
+      const boundary = `----FormBoundary${Math.random().toString(36).slice(2)}`
+      const parts = []
+
+      // Add each character photo as a reference image
+      for (let i = 0; i < charsWithPhotos.length; i++) {
+        const char = charsWithPhotos[i]
+        const matches = char.photo.match(/^data:(.+);base64,(.+)$/)
+        if (!matches) continue
+        const [, mediaType, b64Data] = matches
+        const ext = mediaType.split('/')[1] || 'png'
+        const imgBuffer = Buffer.from(b64Data, 'base64')
+
+        parts.push(
+          `--${boundary}\r\nContent-Disposition: form-data; name="image[]"; filename="char${i}.${ext}"\r\nContent-Type: ${mediaType}\r\n\r\n`,
+          imgBuffer,
+          '\r\n'
+        )
       }
-    })
 
-    // Use image-to-image if we have a character photo reference
-    const requestBody = characterPhotoBase64
-      ? {
-          prompt: fullPrompt,
-          negative_prompt: negativePrompt,
-          image: characterPhotoBase64,
-          strength: 0.65, // 0=identical to photo, 1=ignore photo. 0.65 = keep likeness, allow scene freedom
-          mode: 'image-to-image',
-          output_format: 'jpeg'
-        }
-      : {
-          prompt: fullPrompt,
-          negative_prompt: negativePrompt,
-          aspect_ratio: '1:1',
-          mode: 'text-to-image',
-          output_format: 'jpeg'
-        }
+      // Add remaining fields
+      const fields = { model: 'gpt-image-1.5', prompt: fullPrompt, n: '1', size: '1024x1024' }
+      for (const [key, val] of Object.entries(fields)) {
+        parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${val}\r\n`)
+      }
+      parts.push(`--${boundary}--\r\n`)
 
-    const command = new InvokeModelCommand({
-      modelId: 'stability.sd3-5-large-v1:0',
-      contentType: 'application/json',
-      accept: 'application/json',
-      body: JSON.stringify(requestBody)
-    })
+      const bodyParts = parts.map(p => typeof p === 'string' ? Buffer.from(p) : p)
+      const body = Buffer.concat(bodyParts)
 
-    const response = await client.send(command)
-    const responseBody = JSON.parse(new TextDecoder().decode(response.body))
+      const response = await fetch('https://api.openai.com/v1/images/edits', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+          'Content-Type': `multipart/form-data; boundary=${boundary}`
+        },
+        body
+      })
 
-    const b64 = responseBody.images?.[0]
-    if (!b64) {
-      console.error('No image in response:', JSON.stringify(responseBody).slice(0, 200))
-      return res.status(500).json({ error: 'No image returned from Bedrock' })
+      if (!response.ok) {
+        const err = await response.text()
+        console.error('OpenAI edits error:', err)
+        // Fall back to text-only generation
+        b64 = await generateTextOnly(fullPrompt)
+      } else {
+        const data = await response.json()
+        b64 = data.data?.[0]?.b64_json
+      }
+
+    } else {
+      // No photos — straight text-to-image
+      b64 = await generateTextOnly(fullPrompt)
     }
 
-    res.status(200).json({ b64, contentType: 'image/jpeg' })
+    if (!b64) return res.status(500).json({ error: 'No image returned from OpenAI' })
+
+    return res.status(200).json({ b64, contentType: 'image/png' })
+
   } catch (err) {
-    console.error('Bedrock error:', err.message || err)
-    res.status(500).json({ error: err.message || 'Image generation failed' })
+    console.error('generate-image error:', err)
+    return res.status(500).json({ error: err.message || 'Image generation failed' })
   }
+}
+
+async function generateTextOnly(prompt) {
+  const response = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: 'gpt-image-1.5',
+      prompt,
+      n: 1,
+      size: '1024x1024',
+      quality: 'standard'
+    })
+  })
+
+  if (!response.ok) {
+    const err = await response.text()
+    throw new Error(`OpenAI generations error: ${err}`)
+  }
+
+  const data = await response.json()
+  return data.data?.[0]?.b64_json
 }
