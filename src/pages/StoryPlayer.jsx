@@ -326,8 +326,8 @@ export default function StoryPlayer() {
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: projector ? '32px' : '16px', overflowY: 'auto' }}>
         <div style={{ width: '100%', maxWidth: projector ? 800 : 540, background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 24, overflow: 'hidden' }}>
 
-          {/* Image area */}
-          <div style={{ width: '100%', aspectRatio: '1/1', background: '#1a1830', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden' }}>
+          {/* Image area with text overlay */}
+          <div style={{ width: '100%', aspectRatio: '4/3', background: '#1a1830', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden' }}>
             {current?.imageData ? (
               <img
                 key={`${scene}-${current.imageData?.slice(0,10)}`}
@@ -350,16 +350,32 @@ export default function StoryPlayer() {
                 )}
               </div>
             )}
+
+            {/* Chapter label - top left */}
             <div style={{ position: 'absolute', top: 12, left: 12, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)', borderRadius: 100, padding: '3px 12px', fontSize: 11, color: 'rgba(255,255,255,0.75)' }}>
               {current?.chapter}
             </div>
-          </div>
 
-          {/* Narration */}
-          <div style={{ padding: projector ? '24px 28px 8px' : '18px 20px 8px' }}>
-            <p style={{ fontSize: projector ? 18 : 15, lineHeight: 1.8, color: 'rgba(255,255,255,0.88)', fontFamily: 'Georgia, serif', fontStyle: 'italic' }}>
-              {current?.narration}
-            </p>
+            {/* Narration overlay - bottom gradient panel */}
+            {current?.narration && (
+              <div style={{
+                position: 'absolute', bottom: 0, left: 0, right: 0,
+                background: 'linear-gradient(to top, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.6) 60%, transparent 100%)',
+                padding: projector ? '48px 28px 24px' : '36px 20px 18px',
+              }}>
+                <p style={{
+                  fontSize: projector ? 17 : 14,
+                  lineHeight: 1.75,
+                  color: 'rgba(255,255,255,0.93)',
+                  fontFamily: 'Georgia, serif',
+                  fontStyle: 'italic',
+                  margin: 0,
+                  textShadow: '0 1px 4px rgba(0,0,0,0.8)'
+                }}>
+                  {current.narration}
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Page dots */}
