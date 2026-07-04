@@ -326,8 +326,8 @@ export default function StoryPlayer() {
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: projector ? '32px' : '16px', overflowY: 'auto' }}>
         <div style={{ width: '100%', maxWidth: projector ? 800 : 540, background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 24, overflow: 'hidden' }}>
 
-          {/* Scene: full-bleed image with text overlay */}
-          <div style={{ width: '100%', aspectRatio: '4/3', background: '#1a1830', position: 'relative', overflow: 'hidden' }}>
+          {/* Scene: full-bleed image with parchment scroll overlay */}
+          <div style={{ width: '100%', aspectRatio: '16/10', background: '#1a1830', position: 'relative', overflow: 'hidden' }}>
 
             {/* Full-bleed image */}
             {current?.imageData ? (
@@ -335,7 +335,7 @@ export default function StoryPlayer() {
                 key={`${scene}-${current.imageData?.slice(0,10)}`}
                 src={`data:${current.imageType || 'image/png'};base64,${current.imageData}`}
                 alt={`Scene ${scene + 1}`}
-                style={{ width: '100%', height: '100%', objectFit: 'cover', animation: 'fadeIn 0.6s ease', display: 'block' }}
+                style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center right', animation: 'fadeIn 0.6s ease', display: 'block' }}
               />
             ) : (
               <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: 'rgba(255,255,255,0.25)', gap: 8 }}>
@@ -353,37 +353,43 @@ export default function StoryPlayer() {
               </div>
             )}
 
-            {/* Text overlay — upper left, on top of image */}
+            {/* Parchment scroll overlay */}
             {current?.imageData && (
               <div style={{
-                position: 'absolute', top: 0, left: 0,
-                width: projector ? '44%' : '48%',
-                height: '100%',
-                background: 'linear-gradient(to right, rgba(0,0,0,0.72) 70%, transparent 100%)',
-                padding: projector ? '28px 32px 28px 24px' : '18px 24px 18px 18px',
-                display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', gap: 10,
+                position: 'absolute', top: 0, left: 0, bottom: 0,
+                width: projector ? '40%' : '44%',
+                background: 'linear-gradient(160deg, #f5e6c8 0%, #eddcb0 40%, #e8d4a0 100%)',
+                boxShadow: '4px 0 24px rgba(0,0,0,0.45), inset -2px 0 8px rgba(0,0,0,0.08)',
+                display: 'flex', flexDirection: 'column',
+                padding: projector ? '24px 22px 16px 20px' : '16px 16px 12px 14px',
                 boxSizing: 'border-box',
+                clipPath: 'polygon(0 0, 96% 0, 100% 2%, 98% 4%, 100% 6%, 97% 8%, 100% 50%, 97% 92%, 100% 94%, 98% 96%, 100% 98%, 96% 100%, 0 100%)',
               }}>
-                {/* Chapter label */}
+                {/* Chapter title */}
                 <div style={{
-                  display: 'inline-block', alignSelf: 'flex-start',
-                  background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(4px)',
-                  borderRadius: 100, padding: '3px 12px',
-                  fontSize: 11, color: 'rgba(255,255,255,0.85)', fontWeight: 600
+                  fontSize: projector ? 13 : 11,
+                  fontWeight: 700,
+                  color: '#5c3a1e',
+                  fontFamily: 'Georgia, serif',
+                  marginBottom: 6,
+                  letterSpacing: 0.3,
+                  opacity: 0.7,
+                  textTransform: 'uppercase',
                 }}>
                   {current?.chapter}
                 </div>
-                {/* Narration */}
+                {/* Narration — font scales to fill without scrolling */}
                 <p style={{
-                  fontSize: projector ? 15 : 13,
-                  lineHeight: 1.8,
-                  color: 'rgba(255,255,255,0.93)',
+                  fontSize: projector ? 14 : 12,
+                  lineHeight: 1.75,
+                  color: '#3b2008',
                   fontFamily: 'Georgia, serif',
-                  fontStyle: 'italic',
                   margin: 0,
-                  textShadow: '0 1px 6px rgba(0,0,0,0.9)',
-                  overflowY: 'auto',
-                  maxHeight: '85%',
+                  flex: 1,
+                  overflow: 'hidden',
+                  display: '-webkit-box',
+                  WebkitLineClamp: projector ? 18 : 14,
+                  WebkitBoxOrient: 'vertical',
                 }}>
                   {current?.narration}
                 </p>
