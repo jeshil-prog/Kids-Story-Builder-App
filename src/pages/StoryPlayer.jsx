@@ -18,7 +18,7 @@ export default function StoryPlayer() {
   const { getStory, saveStory } = useStore()
   const [story, setStory] = useState(null)
   const [scene, setScene] = useState(0)
-  const [projector, setProjector] = useState(false)
+  const [projector, setProjector] = useState(true)
   const [speaking, setSpeaking] = useState(false)
   const [loadingAudio, setLoadingAudio] = useState(false)
   const [generatingImages, setGeneratingImages] = useState(false)
@@ -327,9 +327,9 @@ export default function StoryPlayer() {
         <div style={{ width: '100%', maxWidth: projector ? 800 : 540, background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 24, overflow: 'hidden' }}>
 
           {/* Scene: parchment scroll + image side by side, seamlessly joined */}
-          <div style={{ width: '100%', aspectRatio: '16/9', display: 'flex', overflow: 'hidden', background: '#1a1830' }}>
+          <div style={{ width: '100%', display: 'flex', overflow: 'hidden', background: '#1a1830', minHeight: 320 }}>
 
-            {/* Left: parchment scroll */}
+            {/* Left: parchment scroll — height driven by content, image matches */}
             <div style={{
               width: projector ? '38%' : '42%',
               flexShrink: 0,
@@ -339,7 +339,6 @@ export default function StoryPlayer() {
               boxSizing: 'border-box',
               position: 'relative',
               zIndex: 2,
-              // Torn/rough right edge to blend into image
               clipPath: 'polygon(0 0, 97% 0, 100% 1.5%, 98% 3%, 100% 5%, 97% 7%, 99% 10%, 97% 13%, 100% 16%, 98% 20%, 100% 25%, 97% 30%, 100% 35%, 98% 40%, 100% 45%, 97% 50%, 100% 55%, 98% 60%, 100% 65%, 97% 70%, 100% 75%, 98% 80%, 100% 85%, 97% 90%, 100% 93%, 98% 96%, 100% 98.5%, 97% 100%, 0 100%)',
             }}>
               {/* Chapter title */}
@@ -350,34 +349,32 @@ export default function StoryPlayer() {
                 fontFamily: 'Georgia, serif',
                 textTransform: 'uppercase',
                 letterSpacing: 1,
-                marginBottom: projector ? 12 : 8,
                 margin: '0 0 8px 0',
                 opacity: 0.8,
+                flexShrink: 0,
               }}>
                 {current?.chapter}
               </p>
-              {/* Narration */}
+              {/* Narration — always fully visible, no clipping */}
               <p style={{
-                fontSize: projector ? 15 : 12.5,
+                fontSize: projector ? 15 : 13,
                 lineHeight: 1.8,
                 color: '#2e1a08',
                 fontFamily: 'Georgia, serif',
                 margin: 0,
-                flex: 1,
-                overflow: 'hidden',
               }}>
                 {current?.narration}
               </p>
             </div>
 
-            {/* Right: full illustration, no overlay */}
-            <div style={{ flex: 1, position: 'relative', marginLeft: -2 }}>
+            {/* Right: full illustration, matches scroll height */}
+            <div style={{ flex: 1, position: 'relative', marginLeft: -2, minHeight: 280 }}>
               {current?.imageData ? (
                 <img
                   key={`${scene}-${current.imageData?.slice(0,10)}`}
                   src={`data:${current.imageType || 'image/png'};base64,${current.imageData}`}
                   alt={`Scene ${scene + 1}`}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', animation: 'fadeIn 0.6s ease', display: 'block' }}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', animation: 'fadeIn 0.6s ease', display: 'block', position: 'absolute', inset: 0 }}
                 />
               ) : (
                 <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: 'rgba(255,255,255,0.25)', gap: 8 }}>
