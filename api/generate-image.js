@@ -16,15 +16,22 @@ export default async function handler(req, res) {
 
   const styleDesc = STYLE_PROMPTS[style] || "children's book illustration, warm and magical"
   const namedChars = (characters || []).filter(c => c.name)
-  const charsWithPhotos = namedChars.filter(c => c.photo)
+  const charsWithPhotos = namedChars.filter(c => c.photoBase64)
   const charNames = namedChars.map(c => c.name).join(', ')
+
+  // Build character appearance block using AI-generated descriptions where available
+  const charDescriptions = namedChars
+    .filter(c => c.description)
+    .map(c => `${c.name}: ${c.description}`)
+    .join('\n')
 
   const fullPrompt = `${styleDesc} children's picture book full-page illustration.
 
 THE SCENE:
 ${imagePrompt}
 
-${charNames ? `CHARACTERS IN THIS SCENE: ${charNames}. Preserve their exact appearance — same skin tone, hair colour, hair style, face shape, and ethnicity. Do not alter any features.` : ''}
+${charNames ? `CHARACTERS IN THIS SCENE: ${charNames}.` : ''}
+${charDescriptions ? `CHARACTER APPEARANCES (preserve exactly):\n${charDescriptions}` : ''}
 
 STYLE RULES: Wide cinematic composition. Rich detailed environment. Characters integrated naturally into the scene. Warm, joyful, magical atmosphere. No text or words in the image. Child-safe.`
 
@@ -32,20 +39,19 @@ STYLE RULES: Wide cinematic composition. Rich detailed environment. Characters i
     let b64
 
     if (charsWithPhotos.length > 0) {
-      // Use edits endpoint with reference photos via multipart form
+      // Use edits endpoint with reference photos
       const formData = new FormData()
       formData.append('model', 'gpt-image-1.5')
       formData.append('prompt', fullPrompt)
       formData.append('n', '1')
       formData.append('size', '1024x1024')
+      formData.append('quality', 'medium')
 
       for (let i = 0; i < charsWithPhotos.length; i++) {
         const char = charsWithPhotos[i]
-        const matches = char.photo.match(/^data:(.+);base64,(.+)$/)
-        if (!matches) continue
-        const [, mediaType, b64Data] = matches
-        const ext = mediaType.split('/')[1] || 'png'
-        const bytes = Uint8Array.from(atob(b64Data), c => c.charCodeAt(0))
+        const mediaType = char.photoMime || 'image/jpeg'
+        const ext = mediaType.split('/')[1] || 'jpg'
+        const bytes = Uint8Array.from(atob(char.photoBase64), c => c.charCodeAt(0))
         const blob = new Blob([bytes], { type: mediaType })
         formData.append('image[]', blob, `char${i}.${ext}`)
       }
@@ -59,7 +65,7 @@ STYLE RULES: Wide cinematic composition. Rich detailed environment. Characters i
       if (!response.ok) {
         const err = await response.text()
         console.error('OpenAI edits error:', err)
-        // Fall back to text-only
+        // Fall back to text-only using descriptions
         b64 = await generateTextOnly(fullPrompt)
       } else {
         const data = await response.json()

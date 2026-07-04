@@ -83,7 +83,7 @@ export default function Create() {
               body: JSON.stringify({
                 imagePrompt: scene.imagePrompt,
                 style,
-                characters: chosenChars.map(c => ({ name: c.name, photo: c.photo || null }))
+                characters: chosenChars.map(c => ({ name: c.name, photoBase64: c.photoBase64 || null, photoMime: c.photoMime || 'image/jpeg', description: c.description || null }))
               })
             })
             if (imgRes.ok) {
