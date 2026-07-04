@@ -326,82 +326,75 @@ export default function StoryPlayer() {
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: projector ? '32px' : '16px', overflowY: 'auto' }}>
         <div style={{ width: '100%', maxWidth: projector ? 800 : 540, background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 24, overflow: 'hidden' }}>
 
-          {/* Scene: full-bleed image with parchment scroll overlay */}
-          <div style={{ width: '100%', aspectRatio: '16/10', background: '#1a1830', position: 'relative', overflow: 'hidden' }}>
+          {/* Scene: parchment scroll + image side by side, seamlessly joined */}
+          <div style={{ width: '100%', aspectRatio: '16/9', display: 'flex', overflow: 'hidden', background: '#1a1830' }}>
 
-            {/* Full-bleed image */}
-            {current?.imageData ? (
-              <img
-                key={`${scene}-${current.imageData?.slice(0,10)}`}
-                src={`data:${current.imageType || 'image/png'};base64,${current.imageData}`}
-                alt={`Scene ${scene + 1}`}
-                style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center right', animation: 'fadeIn 0.6s ease', display: 'block' }}
-              />
-            ) : (
-              <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: 'rgba(255,255,255,0.25)', gap: 8 }}>
-                {generatingImages && scene >= imagesReady ? (
-                  <>
-                    <div style={{ width: 32, height: 32, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.1)', borderTopColor: '#7F77DD', animation: 'spin 1s linear infinite' }} />
-                    <p style={{ fontSize: 12 }}>Illustrating…</p>
-                  </>
-                ) : (
-                  <>
-                    <p style={{ fontSize: 32 }}>🎨</p>
-                    <p style={{ fontSize: 12 }}>Scene {scene + 1}</p>
-                  </>
-                )}
-              </div>
-            )}
-
-            {/* Parchment scroll overlay */}
-            {current?.imageData && (
-              <div style={{
-                position: 'absolute', top: 0, left: 0, bottom: 0,
-                width: projector ? '40%' : '44%',
-                background: 'linear-gradient(160deg, #f5e6c8 0%, #eddcb0 40%, #e8d4a0 100%)',
-                boxShadow: '4px 0 24px rgba(0,0,0,0.45), inset -2px 0 8px rgba(0,0,0,0.08)',
-                display: 'flex', flexDirection: 'column',
-                padding: projector ? '24px 22px 16px 20px' : '16px 16px 12px 14px',
-                boxSizing: 'border-box',
-                clipPath: 'polygon(0 0, 96% 0, 100% 2%, 98% 4%, 100% 6%, 97% 8%, 100% 50%, 97% 92%, 100% 94%, 98% 96%, 100% 98%, 96% 100%, 0 100%)',
+            {/* Left: parchment scroll */}
+            <div style={{
+              width: projector ? '38%' : '42%',
+              flexShrink: 0,
+              background: 'linear-gradient(175deg, #f7ecd4 0%, #eedcb2 50%, #e8d49e 100%)',
+              display: 'flex', flexDirection: 'column',
+              padding: projector ? '28px 26px 24px 24px' : '18px 18px 16px 16px',
+              boxSizing: 'border-box',
+              position: 'relative',
+              zIndex: 2,
+              // Torn/rough right edge to blend into image
+              clipPath: 'polygon(0 0, 97% 0, 100% 1.5%, 98% 3%, 100% 5%, 97% 7%, 99% 10%, 97% 13%, 100% 16%, 98% 20%, 100% 25%, 97% 30%, 100% 35%, 98% 40%, 100% 45%, 97% 50%, 100% 55%, 98% 60%, 100% 65%, 97% 70%, 100% 75%, 98% 80%, 100% 85%, 97% 90%, 100% 93%, 98% 96%, 100% 98.5%, 97% 100%, 0 100%)',
+            }}>
+              {/* Chapter title */}
+              <p style={{
+                fontSize: projector ? 12 : 10,
+                fontWeight: 700,
+                color: '#6b4423',
+                fontFamily: 'Georgia, serif',
+                textTransform: 'uppercase',
+                letterSpacing: 1,
+                marginBottom: projector ? 12 : 8,
+                margin: '0 0 8px 0',
+                opacity: 0.8,
               }}>
-                {/* Chapter title */}
-                <div style={{
-                  fontSize: projector ? 13 : 11,
-                  fontWeight: 700,
-                  color: '#5c3a1e',
-                  fontFamily: 'Georgia, serif',
-                  marginBottom: 6,
-                  letterSpacing: 0.3,
-                  opacity: 0.7,
-                  textTransform: 'uppercase',
-                }}>
-                  {current?.chapter}
-                </div>
-                {/* Narration — font scales to fill without scrolling */}
-                <p style={{
-                  fontSize: projector ? 14 : 12,
-                  lineHeight: 1.75,
-                  color: '#3b2008',
-                  fontFamily: 'Georgia, serif',
-                  margin: 0,
-                  flex: 1,
-                  overflow: 'hidden',
-                  display: '-webkit-box',
-                  WebkitLineClamp: projector ? 18 : 14,
-                  WebkitBoxOrient: 'vertical',
-                }}>
-                  {current?.narration}
-                </p>
-              </div>
-            )}
-
-            {/* Placeholder chapter label when no image */}
-            {!current?.imageData && (
-              <div style={{ position: 'absolute', top: 12, left: 12, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)', borderRadius: 100, padding: '3px 12px', fontSize: 11, color: 'rgba(255,255,255,0.75)' }}>
                 {current?.chapter}
-              </div>
-            )}
+              </p>
+              {/* Narration */}
+              <p style={{
+                fontSize: projector ? 15 : 12.5,
+                lineHeight: 1.8,
+                color: '#2e1a08',
+                fontFamily: 'Georgia, serif',
+                margin: 0,
+                flex: 1,
+                overflow: 'hidden',
+              }}>
+                {current?.narration}
+              </p>
+            </div>
+
+            {/* Right: full illustration, no overlay */}
+            <div style={{ flex: 1, position: 'relative', marginLeft: -2 }}>
+              {current?.imageData ? (
+                <img
+                  key={`${scene}-${current.imageData?.slice(0,10)}`}
+                  src={`data:${current.imageType || 'image/png'};base64,${current.imageData}`}
+                  alt={`Scene ${scene + 1}`}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', animation: 'fadeIn 0.6s ease', display: 'block' }}
+                />
+              ) : (
+                <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: 'rgba(255,255,255,0.25)', gap: 8 }}>
+                  {generatingImages && scene >= imagesReady ? (
+                    <>
+                      <div style={{ width: 32, height: 32, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.1)', borderTopColor: '#7F77DD', animation: 'spin 1s linear infinite' }} />
+                      <p style={{ fontSize: 12 }}>Illustrating…</p>
+                    </>
+                  ) : (
+                    <>
+                      <p style={{ fontSize: 32 }}>🎨</p>
+                      <p style={{ fontSize: 12 }}>Scene {scene + 1}</p>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Page dots */}
