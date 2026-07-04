@@ -326,56 +326,68 @@ export default function StoryPlayer() {
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: projector ? '32px' : '16px', overflowY: 'auto' }}>
         <div style={{ width: '100%', maxWidth: projector ? 800 : 540, background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 24, overflow: 'hidden' }}>
 
-          {/* Image area with text overlay */}
-          <div style={{ width: '100%', aspectRatio: '4/3', background: '#1a1830', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden' }}>
-            {current?.imageData ? (
-              <img
-                key={`${scene}-${current.imageData?.slice(0,10)}`}
-                src={`data:${current.imageType || 'image/png'};base64,${current.imageData}`}
-                alt={`Scene ${scene + 1}`}
-                style={{ width: '100%', height: '100%', objectFit: 'cover', animation: 'fadeIn 0.6s ease' }}
-              />
-            ) : (
-              <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.25)' }}>
-                {generatingImages && scene >= imagesReady ? (
-                  <>
-                    <div style={{ width: 32, height: 32, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.1)', borderTopColor: '#7F77DD', animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
-                    <p style={{ fontSize: 13 }}>Illustrating scene {scene + 1}…</p>
-                  </>
-                ) : (
-                  <>
-                    <p style={{ fontSize: 36, marginBottom: 8 }}>🎨</p>
-                    <p style={{ fontSize: 13 }}>Scene {scene + 1}</p>
-                  </>
-                )}
-              </div>
-            )}
+          {/* Scene: side-by-side text + image like illustrated book */}
+          <div style={{ width: '100%', aspectRatio: '4/3', background: '#1a1830', display: 'flex', position: 'relative', overflow: 'hidden' }}>
 
-            {/* Chapter label - top left */}
-            <div style={{ position: 'absolute', top: 12, left: 12, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)', borderRadius: 100, padding: '3px 12px', fontSize: 11, color: 'rgba(255,255,255,0.75)' }}>
-              {current?.chapter}
-            </div>
-
-            {/* Narration overlay - bottom gradient panel */}
-            {current?.narration && (
-              <div style={{
-                position: 'absolute', bottom: 0, left: 0, right: 0,
-                background: 'linear-gradient(to top, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.6) 60%, transparent 100%)',
-                padding: projector ? '48px 28px 24px' : '36px 20px 18px',
-              }}>
+            {/* Left: text panel */}
+            <div style={{
+              width: '42%', flexShrink: 0,
+              padding: projector ? '32px 24px' : '20px 18px',
+              display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+              background: 'rgba(10,8,28,0.92)',
+              borderRight: '0.5px solid rgba(255,255,255,0.07)',
+              zIndex: 2
+            }}>
+              {/* Chapter title */}
+              <div>
+                <div style={{
+                  display: 'inline-block',
+                  background: 'rgba(127,119,221,0.18)', border: '0.5px solid rgba(127,119,221,0.35)',
+                  borderRadius: 100, padding: '2px 10px', fontSize: 10,
+                  color: '#a89ef0', marginBottom: 12, fontWeight: 600, letterSpacing: 0.5
+                }}>
+                  {current?.chapter}
+                </div>
                 <p style={{
-                  fontSize: projector ? 17 : 14,
-                  lineHeight: 1.75,
-                  color: 'rgba(255,255,255,0.93)',
+                  fontSize: projector ? 15 : 12.5,
+                  lineHeight: 1.85,
+                  color: 'rgba(255,255,255,0.88)',
                   fontFamily: 'Georgia, serif',
                   fontStyle: 'italic',
                   margin: 0,
-                  textShadow: '0 1px 4px rgba(0,0,0,0.8)'
                 }}>
-                  {current.narration}
+                  {current?.narration}
                 </p>
               </div>
-            )}
+            </div>
+
+            {/* Right: full illustration */}
+            <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+              {current?.imageData ? (
+                <img
+                  key={`${scene}-${current.imageData?.slice(0,10)}`}
+                  src={`data:${current.imageType || 'image/png'};base64,${current.imageData}`}
+                  alt={`Scene ${scene + 1}`}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', animation: 'fadeIn 0.6s ease' }}
+                />
+              ) : (
+                <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: 'rgba(255,255,255,0.25)', gap: 8 }}>
+                  {generatingImages && scene >= imagesReady ? (
+                    <>
+                      <div style={{ width: 32, height: 32, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.1)', borderTopColor: '#7F77DD', animation: 'spin 1s linear infinite' }} />
+                      <p style={{ fontSize: 12 }}>Illustrating…</p>
+                    </>
+                  ) : (
+                    <>
+                      <p style={{ fontSize: 32 }}>🎨</p>
+                      <p style={{ fontSize: 12 }}>Scene {scene + 1}</p>
+                    </>
+                  )}
+                </div>
+              )}
+              {/* Subtle left-edge fade to blend with text panel */}
+              <div style={{ position: 'absolute', inset: 0, left: 0, width: 40, background: 'linear-gradient(to right, rgba(10,8,28,0.7), transparent)', pointerEvents: 'none' }} />
+            </div>
           </div>
 
           {/* Page dots */}
