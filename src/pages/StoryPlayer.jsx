@@ -323,11 +323,11 @@ export default function StoryPlayer() {
       </div>
 
       {/* Scene */}
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: projector ? '32px' : '16px', overflowY: 'auto' }}>
-        <div style={{ width: '100%', maxWidth: projector ? 800 : 540, background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 24, overflow: 'hidden' }}>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'stretch', justifyContent: 'center', overflow: 'hidden' }}>
+        <div style={{ width: '100%', maxWidth: projector ? '100%' : 900, background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: projector ? 0 : 16, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
 
           {/* Scene: parchment scroll + image side by side, seamlessly joined */}
-          <div style={{ width: '100%', display: 'flex', overflow: 'hidden', background: '#1a1830', minHeight: 320 }}>
+          <div style={{ width: '100%', flex: 1, display: 'flex', overflow: 'hidden', background: '#1a1830', minHeight: 320 }}>
 
             {/* Left: parchment scroll — height driven by content, image matches */}
             <div style={{
