@@ -4,6 +4,29 @@ import { Avatar, Button, Input, Spinner } from '../components/UI'
 
 const PERSONALITIES = ['Brave', 'Curious', 'Funny', 'Kind', 'Adventurous', 'Clever', 'Gentle', 'Playful']
 
+const MAX_PHOTO_SIZE = 800
+const PHOTO_QUALITY = 0.8
+
+function compressImage(dataUrl, mimeType) {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      let { width, height } = img
+      if (width > height) {
+        if (width > MAX_PHOTO_SIZE) { height = Math.round(height * MAX_PHOTO_SIZE / width); width = MAX_PHOTO_SIZE }
+      } else {
+        if (height > MAX_PHOTO_SIZE) { width = Math.round(width * MAX_PHOTO_SIZE / height); height = MAX_PHOTO_SIZE }
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+      resolve(canvas.toDataURL('image/jpeg', PHOTO_QUALITY))
+    }
+    img.src = dataUrl
+  })
+}
+
 function CharacterForm({ initial, onSave, onCancel }) {
   const [name, setName] = useState(initial?.name || '')
   const [age, setAge] = useState(initial?.age || '')
@@ -20,16 +43,15 @@ function CharacterForm({ initial, onSave, onCancel }) {
     const file = e.target.files[0]
     if (!file) return
 
-    // Read as data URL for display
     const reader = new FileReader()
     reader.onload = async () => {
-      const dataUrl = reader.result
-      setPhoto(dataUrl)
+      // Compress before storing
+      const compressed = await compressImage(reader.result, file.type)
+      const base64 = compressed.split(',')[1]
 
-      // Extract base64 for API
-      const base64 = dataUrl.split(',')[1]
+      setPhoto(compressed)
       setPhotoBase64(base64)
-      setPhotoMime(file.type || 'image/jpeg')
+      setPhotoMime('image/jpeg')
 
       // Auto-analyse the photo
       if (name || initial?.name) {
@@ -40,7 +62,7 @@ function CharacterForm({ initial, onSave, onCancel }) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               photoBase64: base64,
-              mimeType: file.type || 'image/jpeg',
+              mimeType: 'image/jpeg',
               name: name || initial?.name,
               age: age || initial?.age
             })
