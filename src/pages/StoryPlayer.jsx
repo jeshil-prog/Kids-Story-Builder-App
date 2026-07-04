@@ -367,17 +367,17 @@ export default function StoryPlayer() {
               </p>
             </div>
 
-            {/* Right: full illustration, matches scroll height */}
-            <div style={{ flex: 1, position: 'relative', marginLeft: -2, minHeight: 280 }}>
+            {/* Right: full illustration, always fills height */}
+            <div style={{ flex: 1, position: 'relative', marginLeft: -2, minHeight: 280, overflow: 'hidden' }}>
               {current?.imageData ? (
                 <img
                   key={`${scene}-${current.imageData?.slice(0,10)}`}
                   src={`data:${current.imageType || 'image/png'};base64,${current.imageData}`}
                   alt={`Scene ${scene + 1}`}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', animation: 'fadeIn 0.6s ease', display: 'block', position: 'absolute', inset: 0 }}
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top', animation: 'fadeIn 0.6s ease', display: 'block' }}
                 />
               ) : (
-                <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: 'rgba(255,255,255,0.25)', gap: 8 }}>
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: 'rgba(255,255,255,0.25)', gap: 8 }}>
                   {generatingImages && scene >= imagesReady ? (
                     <>
                       <div style={{ width: 32, height: 32, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.1)', borderTopColor: '#7F77DD', animation: 'spin 1s linear infinite' }} />
