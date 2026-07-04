@@ -1,4 +1,4 @@
-export const config = { maxDuration: 60 }
+export const config = { maxDuration: 300 }
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -78,7 +78,7 @@ Return this exact JSON shape:
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 4000,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }]
