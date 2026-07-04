@@ -1,4 +1,4 @@
-export const config = { maxDuration: 300 }
+export const config = { maxDuration: 60 }
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -61,10 +61,10 @@ Return this exact JSON shape:
       "sfxCues": [
         {
           "triggerPhrase": "exact short phrase from the narration text that should trigger the sound (3-5 words)",
-          "sound": "one of: birds, wind, rain, thunder, fire, magic, ocean, jungle, footsteps, gasp, laugh, whoosh, sparkle, fanfare, splash, rustle, knock, creaking, growl, chime"
+          "sound": "A short natural language description of the sound effect for a children's storybook — warm, gentle, and age-appropriate. Be specific and vivid. Examples: 'gentle ocean waves lapping on a sandy shore, peaceful and calming', 'magical sparkle chime, like fairy dust floating through the air', 'friendly dragon purring softly, warm and rumbling like a giant cat', 'cheerful birds singing in a sunny forest, joyful morning birdsong', 'soft rain pattering on leaves, cosy and gentle', 'whoosh of wind as someone flies through the air on a magic carpet', 'cosy crackling campfire with gentle popping embers', 'excited children cheering and clapping with delight'. Never use scary, violent, or distressing sounds."
         }
       ]
-      Note: include 1-3 sfxCues per scene, placed at natural sound moments. triggerPhrase must be an exact substring of the narration.
+      Note: include 1-3 sfxCues per scene, placed at natural sound moments in the narration. triggerPhrase must be an exact substring of the narration text. Make each sound description unique and specific to what is actually happening in that moment of the story.
     }
   ]
 }`
@@ -78,7 +78,7 @@ Return this exact JSON shape:
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: 'claude-sonnet-4-6',
         max_tokens: 4000,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }]
