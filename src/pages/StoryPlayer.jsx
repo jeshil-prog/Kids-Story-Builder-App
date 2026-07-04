@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useStore } from '../lib/store'
-import { playSfx, buildSfxTimeline, stopAmbientSfx } from '../lib/sfx'
+import { buildSfxTimeline, stopAmbientSfx } from '../lib/sfx'
 
 const STYLE_PROMPTS = {
   'Watercolour': "soft watercolour children's book illustration, painterly, gentle colours,",
@@ -25,6 +25,7 @@ export default function StoryPlayer() {
   const [genDetail, setGenDetail] = useState('')
   const [imageProgress, setImageProgress] = useState(0)
   const audioRef = useRef(null)
+  const sfxCacheRef = useRef({})
   const autoAdvanceRef = useRef(null)
   const imageGenRef = useRef(false)
 
@@ -162,6 +163,29 @@ export default function StoryPlayer() {
     saveStory(updated)
   }
 
+  // Generate and play sfx via ElevenLabs, with in-memory cache
+  const playSfx = useCallback(async (sound) => {
+    try {
+      let b64 = sfxCacheRef.current[sound]
+      if (!b64) {
+        const res = await fetch('/api/generate-sfx', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sound })
+        })
+        if (!res.ok) return
+        const data = await res.json()
+        b64 = data.b64
+        sfxCacheRef.current[sound] = b64
+      }
+      const audio = new Audio(`data:audio/mpeg;base64,${b64}`)
+      audio.volume = 0.35
+      audio.play().catch(() => {})
+    } catch (err) {
+      console.error('SFX error:', err)
+    }
+  }, [])
+
   const stopAudio = useCallback(() => {
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null }
     if (window.speechSynthesis) window.speechSynthesis.cancel()
@@ -193,7 +217,7 @@ export default function StoryPlayer() {
         const res = await fetch('https://api.openai.com/v1/audio/speech', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${openAiKey}` },
-          body: JSON.stringify({ model: 'tts-1', input: current.narration, voice: 'nova', speed: 0.9 })
+          body: JSON.stringify({ model: 'gpt-4o-mini-tts', input: current.narration, voice: 'coral', instructions: 'Speak warmly and gently, like a parent reading a bedtime story. Use a calm, expressive, storytelling tone.', speed: 0.9 })
         })
         if (res.ok) {
           const blob = await res.blob()
