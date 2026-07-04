@@ -326,68 +326,76 @@ export default function StoryPlayer() {
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: projector ? '32px' : '16px', overflowY: 'auto' }}>
         <div style={{ width: '100%', maxWidth: projector ? 800 : 540, background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 24, overflow: 'hidden' }}>
 
-          {/* Scene: side-by-side text + image like illustrated book */}
-          <div style={{ width: '100%', aspectRatio: '4/3', background: '#1a1830', display: 'flex', position: 'relative', overflow: 'hidden' }}>
+          {/* Scene: full-bleed image with text overlay */}
+          <div style={{ width: '100%', aspectRatio: '4/3', background: '#1a1830', position: 'relative', overflow: 'hidden' }}>
 
-            {/* Left: text panel */}
-            <div style={{
-              width: '42%', flexShrink: 0,
-              padding: projector ? '32px 24px' : '20px 18px',
-              display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-              background: 'rgba(10,8,28,0.92)',
-              borderRight: '0.5px solid rgba(255,255,255,0.07)',
-              zIndex: 2
-            }}>
-              {/* Chapter title */}
-              <div>
+            {/* Full-bleed image */}
+            {current?.imageData ? (
+              <img
+                key={`${scene}-${current.imageData?.slice(0,10)}`}
+                src={`data:${current.imageType || 'image/png'};base64,${current.imageData}`}
+                alt={`Scene ${scene + 1}`}
+                style={{ width: '100%', height: '100%', objectFit: 'cover', animation: 'fadeIn 0.6s ease', display: 'block' }}
+              />
+            ) : (
+              <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: 'rgba(255,255,255,0.25)', gap: 8 }}>
+                {generatingImages && scene >= imagesReady ? (
+                  <>
+                    <div style={{ width: 32, height: 32, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.1)', borderTopColor: '#7F77DD', animation: 'spin 1s linear infinite' }} />
+                    <p style={{ fontSize: 12 }}>Illustrating…</p>
+                  </>
+                ) : (
+                  <>
+                    <p style={{ fontSize: 32 }}>🎨</p>
+                    <p style={{ fontSize: 12 }}>Scene {scene + 1}</p>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Text overlay — upper left, on top of image */}
+            {current?.imageData && (
+              <div style={{
+                position: 'absolute', top: 0, left: 0,
+                width: projector ? '44%' : '48%',
+                height: '100%',
+                background: 'linear-gradient(to right, rgba(0,0,0,0.72) 70%, transparent 100%)',
+                padding: projector ? '28px 32px 28px 24px' : '18px 24px 18px 18px',
+                display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', gap: 10,
+                boxSizing: 'border-box',
+              }}>
+                {/* Chapter label */}
                 <div style={{
-                  display: 'inline-block',
-                  background: 'rgba(127,119,221,0.18)', border: '0.5px solid rgba(127,119,221,0.35)',
-                  borderRadius: 100, padding: '2px 10px', fontSize: 10,
-                  color: '#a89ef0', marginBottom: 12, fontWeight: 600, letterSpacing: 0.5
+                  display: 'inline-block', alignSelf: 'flex-start',
+                  background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(4px)',
+                  borderRadius: 100, padding: '3px 12px',
+                  fontSize: 11, color: 'rgba(255,255,255,0.85)', fontWeight: 600
                 }}>
                   {current?.chapter}
                 </div>
+                {/* Narration */}
                 <p style={{
-                  fontSize: projector ? 15 : 12.5,
-                  lineHeight: 1.85,
-                  color: 'rgba(255,255,255,0.88)',
+                  fontSize: projector ? 15 : 13,
+                  lineHeight: 1.8,
+                  color: 'rgba(255,255,255,0.93)',
                   fontFamily: 'Georgia, serif',
                   fontStyle: 'italic',
                   margin: 0,
+                  textShadow: '0 1px 6px rgba(0,0,0,0.9)',
+                  overflowY: 'auto',
+                  maxHeight: '85%',
                 }}>
                   {current?.narration}
                 </p>
               </div>
-            </div>
+            )}
 
-            {/* Right: full illustration */}
-            <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-              {current?.imageData ? (
-                <img
-                  key={`${scene}-${current.imageData?.slice(0,10)}`}
-                  src={`data:${current.imageType || 'image/png'};base64,${current.imageData}`}
-                  alt={`Scene ${scene + 1}`}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover', animation: 'fadeIn 0.6s ease' }}
-                />
-              ) : (
-                <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: 'rgba(255,255,255,0.25)', gap: 8 }}>
-                  {generatingImages && scene >= imagesReady ? (
-                    <>
-                      <div style={{ width: 32, height: 32, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.1)', borderTopColor: '#7F77DD', animation: 'spin 1s linear infinite' }} />
-                      <p style={{ fontSize: 12 }}>Illustrating…</p>
-                    </>
-                  ) : (
-                    <>
-                      <p style={{ fontSize: 32 }}>🎨</p>
-                      <p style={{ fontSize: 12 }}>Scene {scene + 1}</p>
-                    </>
-                  )}
-                </div>
-              )}
-              {/* Subtle left-edge fade to blend with text panel */}
-              <div style={{ position: 'absolute', inset: 0, left: 0, width: 40, background: 'linear-gradient(to right, rgba(10,8,28,0.7), transparent)', pointerEvents: 'none' }} />
-            </div>
+            {/* Placeholder chapter label when no image */}
+            {!current?.imageData && (
+              <div style={{ position: 'absolute', top: 12, left: 12, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)', borderRadius: 100, padding: '3px 12px', fontSize: 11, color: 'rgba(255,255,255,0.75)' }}>
+                {current?.chapter}
+              </div>
+            )}
           </div>
 
           {/* Page dots */}
