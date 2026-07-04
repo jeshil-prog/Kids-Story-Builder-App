@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useStore } from '../lib/store'
 import { Avatar, Button, Input, Spinner } from '../components/UI'
 
@@ -210,6 +211,7 @@ function CharacterForm({ initial, onSave, onCancel }) {
 }
 
 export default function Characters() {
+  const navigate = useNavigate()
   const { characters, addCharacter, updateCharacter, deleteCharacter } = useStore()
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState(null)
@@ -217,7 +219,10 @@ export default function Characters() {
   return (
     <div style={{ padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 20, overflowY: 'auto', flex: 1 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <h2 style={{ fontSize: 20, fontWeight: 600 }}>Characters</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button onClick={() => navigate('/create')} style={{ background: 'none', border: '0.5px solid var(--border)', borderRadius: 8, padding: '6px 12px', fontSize: 13, color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>← Create</button>
+          <h2 style={{ fontSize: 20, fontWeight: 600 }}>Characters</h2>
+        </div>
         {!adding && (
           <Button onClick={() => setAdding(true)} style={{ padding: '8px 16px', fontSize: 13 }}>
             + Add character
@@ -227,7 +232,7 @@ export default function Characters() {
 
       {adding && (
         <CharacterForm
-          onSave={(data) => { addCharacter(data); setAdding(false) }}
+          onSave={(data) => { addCharacter(data); setAdding(false); navigate('/create?autoselect=new') }}
           onCancel={() => setAdding(false)}
         />
       )}

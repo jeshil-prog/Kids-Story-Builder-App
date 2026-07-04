@@ -1,5 +1,5 @@
-import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import React, { useState, useEffect } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { useStore } from '../lib/store'
 import { Avatar, Button, SectionLabel, Spinner } from '../components/UI'
 import { v4 as uuidv4 } from 'uuid'
@@ -39,6 +39,16 @@ export default function Create() {
   const [genStep, setGenStep] = useState(0)
   const [genDetail, setGenDetail] = useState('')
   const [error, setError] = useState(null)
+
+  const location = useLocation()
+
+  // Auto-select newest character when arriving from Characters page
+  useEffect(() => {
+    if (location.search.includes('autoselect=new') && characters.length > 0) {
+      const newest = characters[characters.length - 1]
+      setSelectedChars(prev => prev.includes(newest.id) ? prev : [...prev, newest.id])
+    }
+  }, [location.search, characters])
 
   const toggleChar = (id) => setSelectedChars(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id])
   const chosenChars = characters.filter(c => selectedChars.includes(c.id))
@@ -201,7 +211,7 @@ export default function Create() {
           rows={3}
           style={{
             width: '100%', padding: '12px 14px', borderRadius: 12,
-            border: '0.5px solid var(--border)', background: 'var(--surface-input)',
+            border: `0.5px solid ${prompt.trim().length === 0 && chosenChars.length > 0 ? '#534AB7' : 'var(--border)'}`, background: 'var(--surface-input)',
             fontFamily: 'inherit', fontSize: 14, color: 'var(--text-primary)',
             resize: 'none', lineHeight: 1.6, outline: 'none', transition: 'border-color 0.15s',
             boxSizing: 'border-box'
@@ -209,6 +219,11 @@ export default function Create() {
           onFocus={e => e.target.style.borderColor = '#534AB7'}
           onBlur={e => e.target.style.borderColor = 'var(--border)'}
         />
+        {chosenChars.length > 0 && prompt.trim().length === 0 && (
+          <p style={{ fontSize: 12, color: '#534AB7', marginTop: 6, marginBottom: 0 }}>
+            ✏️ Type your story idea above to enable the Generate button
+          </p>
+        )}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
           {GENRES.map(g => (
             <button
