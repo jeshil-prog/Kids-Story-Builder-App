@@ -8,6 +8,12 @@ import Library from './pages/Library'
 
 function Nav() {
   const loc = useLocation()
+  const [narrow, setNarrow] = React.useState(window.innerWidth < 400)
+  React.useEffect(() => {
+    const handler = () => setNarrow(window.innerWidth < 400)
+    window.addEventListener('resize', handler)
+    return () => window.removeEventListener('resize', handler)
+  }, [])
   const isStory = loc.pathname.startsWith('/story/')
   if (isStory) return null
 
@@ -31,39 +37,28 @@ function Nav() {
         flexShrink: 0, width: '100%', boxSizing: 'border-box',
         overflowX: 'hidden'  
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
           <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#534AB7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>🌙</div>
-          <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--text-primary)' }}>StoryDream</span>
+          {!narrow && <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--text-primary)' }}>StoryDream</span>}
         </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
-          {tabs.slice(0, 3).map(t => (
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
+          {tabs.map(t => (
             <NavLink
               key={t.to}
               to={t.to}
               end={t.to === '/'}
               style={({ isActive }) => ({
-                padding: '6px 14px', borderRadius: 8, fontSize: 13,
+                padding: '6px 10px', borderRadius: 8, fontSize: 12,
                 color: isActive ? '#3C3489' : 'var(--text-secondary)',
                 background: isActive ? '#EEEDFE' : 'transparent',
                 fontWeight: isActive ? 600 : 400,
-                textDecoration: 'none', transition: 'all 0.15s'
+                textDecoration: 'none', transition: 'all 0.15s',
+                whiteSpace: 'nowrap'
               })}
             >
               {t.label}
             </NavLink>
           ))}
-          <NavLink
-            to="/library"
-            style={({ isActive }) => ({
-              padding: '6px 14px', borderRadius: 8, fontSize: 13,
-              color: isActive ? '#3C3489' : 'var(--text-secondary)',
-              background: isActive ? '#EEEDFE' : 'transparent',
-              fontWeight: isActive ? 600 : 400,
-              textDecoration: 'none', transition: 'all 0.15s'
-            })}
-          >
-            Library
-          </NavLink>
         </div>
       </div>
     </>
