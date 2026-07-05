@@ -18,7 +18,8 @@ export default function StoryPlayer() {
   const { getStory, saveStory } = useStore()
   const [story, setStory] = useState(null)
   const [scene, setScene] = useState(0)
-  const isWide = () => window.innerWidth >= 600
+  // True wide layout only on tablet/desktop — not phones in landscape
+  const isWide = () => window.innerWidth >= 700 && window.innerHeight >= 500
   const [projector, setProjector] = useState(isWide)
 
   // Auto-switch layout on resize/rotation
