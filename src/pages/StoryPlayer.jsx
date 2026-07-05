@@ -47,6 +47,38 @@ export default function StoryPlayer() {
     }
   }, [id])
 
+  // Poll for background-generated images from S3
+  useEffect(() => {
+    if (!story?.id) return
+    const hasPending = story.scenes.some(s => !s.imageUrl && !s.imageData)
+    if (!hasPending) return
+
+    let cancelled = false
+    const poll = async () => {
+      if (cancelled) return
+      try {
+        const res = await fetch(`/api/image-status?storyId=${story.id}&sceneCount=${story.scenes.length}`)
+        if (!res.ok || cancelled) return
+        const { scenes: statuses } = await res.json()
+        let anyUpdated = false
+        const updatedScenes = story.scenes.map((scene, i) => {
+          if (statuses[i]?.status === 'done' && statuses[i].imageUrl && !scene.imageUrl) {
+            anyUpdated = true
+            return { ...scene, imageUrl: statuses[i].imageUrl }
+          }
+          return scene
+        })
+        if (anyUpdated) setStory(prev => ({ ...prev, scenes: updatedScenes }))
+        const stillPending = statuses.filter(s => !s || s.status === 'processing').length
+        if (stillPending > 0 && !cancelled) setTimeout(poll, 3000)
+      } catch (err) {
+        console.error('Image polling error:', err)
+      }
+    }
+    const timer = setTimeout(poll, 2000)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [story?.id])
+
   const startImageGeneration = async (s) => {
     if (imageGenRef.current) return
     imageGenRef.current = true

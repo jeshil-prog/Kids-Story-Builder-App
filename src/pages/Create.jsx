@@ -66,36 +66,26 @@ export default function Create() {
       const story = await storyRes.json()
 
       setGenStep(1)
-      setGenDetail(`Story written — ${story.scenes.length} scenes ready. Now illustrating…`)
+      setGenDetail(`Story written — ${story.scenes.length} scenes ready. Queueing illustrations…`)
 
-      // Step 2: Generate images in parallel (batches of 3 to avoid rate limits)
-      const scenes = story.scenes
-      const batchSize = 3
-      for (let i = 0; i < scenes.length; i += batchSize) {
-        const batch = scenes.slice(i, i + batchSize)
-        setGenStep(2)
-        setGenDetail(`Illustrating scenes ${i + 1}–${Math.min(i + batchSize, scenes.length)} of ${scenes.length}…`)
-        await Promise.all(batch.map(async (scene) => {
-          try {
-            const imgRes = await fetch('/api/generate-image', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                imagePrompt: scene.imagePrompt,
-                style,
-                storyId: id,
-                sceneIndex: scene.sceneNumber,
-                characters: chosenChars.map(c => ({ name: c.name, photoBase64: c.photoBase64 || null, photoMime: c.photoMime || 'image/jpeg', description: c.description || null }))
-              })
-            })
-            if (imgRes.ok) {
-              const { imageUrl } = await imgRes.json()
-              scene.imageUrl = imageUrl
-            }
-          } catch {
-            // image failed — story still works without it
-          }
-        }))
+      const id = uuidv4()
+
+      // Step 2: Queue image jobs via QStash — non-blocking, each runs independently
+      setGenStep(2)
+      setGenDetail('Sending scenes to be illustrated in the background…')
+      try {
+        await fetch('/api/queue-images', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            storyId: id,
+            scenes: story.scenes,
+            style,
+            characters: chosenChars.map(c => ({ name: c.name, photoBase64: c.photoBase64 || null, photoMime: c.photoMime || 'image/jpeg', description: c.description || null }))
+          })
+        })
+      } catch (err) {
+        console.error('Failed to queue images:', err)
       }
 
       setGenStep(3)
