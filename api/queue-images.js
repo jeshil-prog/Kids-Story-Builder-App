@@ -7,6 +7,8 @@ export default async function handler(req, res) {
   if (!storyId || !scenes) return res.status(400).json({ error: 'Missing storyId or scenes' })
 
   const baseUrl = `https://${req.headers.host}`
+  const token = process.env.QSTASH_TOKEN
+  console.log('QSTASH_TOKEN present:', !!token, 'length:', token?.length, 'starts:', token?.slice(0, 10))
 
   // Queue one job per scene via QStash
   const results = await Promise.allSettled(scenes.map(async (scene, i) => {
