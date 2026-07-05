@@ -24,10 +24,12 @@ function Nav() {
       <div style={{
         background: 'var(--surface-nav)',
         borderBottom: '0.5px solid var(--border)',
-        padding: '0 20px',
+        padding: '0 16px',
         paddingTop: 'env(safe-area-inset-top, 0px)',
-        display: 'flex', alignItems: 'center', gap: 16,
-        height: 'calc(52px + env(safe-area-inset-top, 0px))', flexShrink: 0
+        display: 'flex', alignItems: 'center', gap: 8,
+        height: 'calc(52px + env(safe-area-inset-top, 0px))',
+        flexShrink: 0, width: '100%', boxSizing: 'border-box',
+        overflowX: 'hidden'  
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#534AB7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>🌙</div>
@@ -71,9 +73,9 @@ function Nav() {
 export default function App() {
   return (
     <BrowserRouter>
-      <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: 'var(--surface-0)' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100dvh', background: 'var(--surface-0)', overflowX: 'hidden' }}>
         <Nav />
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', maxWidth: 680, width: '100%', margin: '0 auto', alignSelf: 'stretch' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', width: '100%', overflowX: 'hidden' }}>
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/create" element={<Create />} />
