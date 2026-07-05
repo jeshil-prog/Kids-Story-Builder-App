@@ -23,7 +23,8 @@ export default async function handler(req, res) {
       }))
     }
 
-    const response = await fetch('https://qstash.upstash.io/v2/publish/' + encodeURIComponent(`${baseUrl}/api/worker/generate-image`), {
+    const qstashUrl = (process.env.QSTASH_URL || 'https://qstash.upstash.io').replace(/\/+$/, '')
+    const response = await fetch(`${qstashUrl}/v2/publish/${encodeURIComponent(`${baseUrl}/api/worker/generate-image`)}`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${process.env.QSTASH_TOKEN}`,
