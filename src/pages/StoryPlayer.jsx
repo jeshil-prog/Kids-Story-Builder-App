@@ -18,7 +18,15 @@ export default function StoryPlayer() {
   const { getStory, saveStory } = useStore()
   const [story, setStory] = useState(null)
   const [scene, setScene] = useState(0)
-  const [projector, setProjector] = useState(true)
+  const isWide = () => window.innerWidth >= 600
+  const [projector, setProjector] = useState(isWide)
+
+  // Auto-switch layout on resize/rotation
+  useEffect(() => {
+    const handleResize = () => setProjector(isWide())
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
   const [speaking, setSpeaking] = useState(false)
   const [loadingAudio, setLoadingAudio] = useState(false)
   const [generatingImages, setGeneratingImages] = useState(false)

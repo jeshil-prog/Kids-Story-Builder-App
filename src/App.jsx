@@ -25,8 +25,9 @@ function Nav() {
         background: 'var(--surface-nav)',
         borderBottom: '0.5px solid var(--border)',
         padding: '0 20px',
+        paddingTop: 'env(safe-area-inset-top, 0px)',
         display: 'flex', alignItems: 'center', gap: 16,
-        height: 52, flexShrink: 0
+        height: 'calc(52px + env(safe-area-inset-top, 0px))', flexShrink: 0
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#534AB7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>🌙</div>
