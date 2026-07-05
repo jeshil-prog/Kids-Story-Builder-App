@@ -348,24 +348,27 @@ export default function StoryPlayer() {
       <div style={{ flex: 1, display: 'flex', alignItems: 'stretch', justifyContent: 'center', overflow: 'hidden' }}>
         <div style={{ width: '100%', maxWidth: projector ? '100%' : 900, background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: projector ? 0 : 16, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
 
-          {/* Scene: parchment scroll + image side by side, seamlessly joined */}
-          <div style={{ width: '100%', flex: 1, display: 'flex', overflow: 'hidden', background: '#1a1830', minHeight: 320 }}>
+          {/* Scene: responsive layout — side-by-side on wide screens, stacked on mobile */}
+          <div style={{ width: '100%', flex: 1, display: 'flex', flexDirection: projector ? 'row' : 'column', overflow: 'hidden', background: '#1a1830' }}>
 
-            {/* Left: parchment scroll — height driven by content, image matches */}
+            {/* Parchment scroll */}
             <div style={{
-              width: projector ? '38%' : '42%',
+              width: projector ? '38%' : '100%',
               flexShrink: 0,
               background: 'linear-gradient(175deg, #f7ecd4 0%, #eedcb2 50%, #e8d49e 100%)',
               display: 'flex', flexDirection: 'column',
-              padding: projector ? '28px 26px 24px 24px' : '18px 18px 16px 16px',
+              padding: projector ? '28px 26px 24px 24px' : '16px 18px',
               boxSizing: 'border-box',
               position: 'relative',
               zIndex: 2,
-              clipPath: 'polygon(0 0, 97% 0, 100% 1.5%, 98% 3%, 100% 5%, 97% 7%, 99% 10%, 97% 13%, 100% 16%, 98% 20%, 100% 25%, 97% 30%, 100% 35%, 98% 40%, 100% 45%, 97% 50%, 100% 55%, 98% 60%, 100% 65%, 97% 70%, 100% 75%, 98% 80%, 100% 85%, 97% 90%, 100% 93%, 98% 96%, 100% 98.5%, 97% 100%, 0 100%)',
+              // Torn edge only on right side in landscape, bottom edge in portrait
+              clipPath: projector
+                ? 'polygon(0 0, 97% 0, 100% 1.5%, 98% 3%, 100% 5%, 97% 7%, 99% 10%, 97% 13%, 100% 16%, 98% 20%, 100% 25%, 97% 30%, 100% 35%, 98% 40%, 100% 45%, 97% 50%, 100% 55%, 98% 60%, 100% 65%, 97% 70%, 100% 75%, 98% 80%, 100% 85%, 97% 90%, 100% 93%, 98% 96%, 100% 98.5%, 97% 100%, 0 100%)'
+                : 'polygon(0 0, 100% 0, 100% 95%, 98% 97%, 100% 98.5%, 97% 100%, 95% 98%, 92% 100%, 89% 97%, 86% 100%, 83% 98%, 80% 100%, 77% 97%, 74% 100%, 71% 98%, 68% 100%, 65% 97%, 62% 100%, 59% 98%, 56% 100%, 53% 97%, 50% 100%, 47% 98%, 44% 100%, 41% 97%, 38% 100%, 35% 98%, 32% 100%, 29% 97%, 26% 100%, 23% 98%, 20% 100%, 17% 97%, 14% 100%, 11% 98%, 8% 100%, 5% 97%, 2% 100%, 0 98%)',
             }}>
               {/* Chapter title */}
               <p style={{
-                fontSize: projector ? 12 : 10,
+                fontSize: projector ? 12 : 11,
                 fontWeight: 700,
                 color: '#6b4423',
                 fontFamily: 'Georgia, serif',
@@ -377,20 +380,21 @@ export default function StoryPlayer() {
               }}>
                 {current?.chapter}
               </p>
-              {/* Narration — always fully visible, no clipping */}
+              {/* Narration */}
               <p style={{
-                fontSize: projector ? 15 : 13,
+                fontSize: projector ? 15 : 14,
                 lineHeight: 1.8,
                 color: '#2e1a08',
                 fontFamily: 'Georgia, serif',
                 margin: 0,
+                paddingBottom: projector ? 0 : 8,
               }}>
                 {current?.narration}
               </p>
             </div>
 
-            {/* Right: full illustration, always fills height */}
-            <div style={{ flex: 1, position: 'relative', marginLeft: -2, minHeight: 280, overflow: 'hidden' }}>
+            {/* Illustration */}
+            <div style={{ flex: 1, position: 'relative', minHeight: projector ? 280 : 260, overflow: 'hidden', marginTop: projector ? 0 : -8 }}>
               {current?.imageData ? (
                 <img
                   key={`${scene}-${current.imageData?.slice(0,10)}`}
