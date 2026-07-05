@@ -404,10 +404,10 @@ export default function StoryPlayer() {
 
             {/* Illustration */}
             <div style={{ flex: 1, position: 'relative', minHeight: projector ? 280 : 260, overflow: 'hidden', marginTop: projector ? 0 : -8 }}>
-              {current?.imageData ? (
+              {(current?.imageUrl || current?.imageData) ? (
                 <img
                   key={`${scene}-${current.imageData?.slice(0,10)}`}
-                  src={`data:${current.imageType || 'image/png'};base64,${current.imageData}`}
+                  src={current.imageUrl || `data:${current.imageType || 'image/png'};base64,${current.imageData}`}
                   alt={`Scene ${scene + 1}`}
                   style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top', animation: 'fadeIn 0.6s ease', display: 'block' }}
                 />

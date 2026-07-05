@@ -9,17 +9,36 @@ const STYLE_PROMPTS = {
   'Claymation': 'Laika studio claymation style, tactile clay textures, bright cheerful colours, stop-motion aesthetic'
 }
 
+async function uploadToS3(b64, contentType, key) {
+  const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3')
+  const client = new S3Client({
+    region: process.env.AWS_REGION || 'ap-southeast-2',
+    credentials: {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+    }
+  })
+  const buf = Buffer.from(b64, 'base64')
+  await client.send(new PutObjectCommand({
+    Bucket: process.env.AWS_S3_BUCKET,
+    Key: key,
+    Body: buf,
+    ContentType: contentType,
+    CacheControl: 'public, max-age=31536000'
+  }))
+  return `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION || 'ap-southeast-2'}.amazonaws.com/${key}`
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  const { imagePrompt, style, characters } = req.body
+  const { imagePrompt, style, characters, storyId, sceneIndex } = req.body
 
   const styleDesc = STYLE_PROMPTS[style] || "children's book illustration, warm and magical"
   const namedChars = (characters || []).filter(c => c.name)
   const charsWithPhotos = namedChars.filter(c => c.photoBase64)
   const charNames = namedChars.map(c => c.name).join(', ')
 
-  // Build character appearance block using AI-generated descriptions where available
   const charDescriptions = namedChars
     .filter(c => c.description)
     .map(c => `${c.name}: ${c.description}`)
@@ -39,7 +58,6 @@ STYLE RULES: Wide cinematic composition. Rich detailed environment. Characters i
     let b64
 
     if (charsWithPhotos.length > 0) {
-      // Use edits endpoint with reference photos
       const formData = new FormData()
       formData.append('model', 'gpt-image-1.5')
       formData.append('prompt', fullPrompt)
@@ -65,20 +83,22 @@ STYLE RULES: Wide cinematic composition. Rich detailed environment. Characters i
       if (!response.ok) {
         const err = await response.text()
         console.error('OpenAI edits error:', err)
-        // Fall back to text-only using descriptions
         b64 = await generateTextOnly(fullPrompt)
       } else {
         const data = await response.json()
         b64 = data.data?.[0]?.b64_json
       }
-
     } else {
       b64 = await generateTextOnly(fullPrompt)
     }
 
     if (!b64) return res.status(500).json({ error: 'No image returned from OpenAI' })
 
-    return res.status(200).json({ b64, contentType: 'image/png' })
+    // Upload to S3
+    const key = `scenes/${storyId || 'unknown'}/${sceneIndex ?? Date.now()}.png`
+    const imageUrl = await uploadToS3(b64, 'image/png', key)
+
+    return res.status(200).json({ imageUrl, contentType: 'image/png' })
 
   } catch (err) {
     console.error('generate-image error:', err)
