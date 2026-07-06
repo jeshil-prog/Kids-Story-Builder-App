@@ -6,12 +6,14 @@ export default async function handler(req, res) {
   const { storyId, scenes, style, characters } = req.body
   if (!storyId || !scenes) return res.status(400).json({ error: 'Missing storyId or scenes' })
 
+  const token = process.env.QSTASH_TOKEN
   const baseUrl = `https://${req.headers.host}`
   const workerUrl = `${baseUrl}/api/worker/generate-image`
 
-  // Fire off all scene generation requests without waiting for them
-  // Each runs independently in its own Vercel function invocation
-  scenes.forEach((scene, i) => {
+  console.log('Token length:', token?.length)
+  console.log('Worker URL:', workerUrl)
+
+  const results = await Promise.allSettled(scenes.map(async (scene, i) => {
     const payload = {
       storyId,
       sceneIndex: i,
@@ -25,16 +27,30 @@ export default async function handler(req, res) {
       }))
     }
 
-    // Use waitUntil pattern - fire and forget
-    fetch(workerUrl, {
+    const response = await fetch(`https://qstash.upstash.io/v2/publish/${encodeURIComponent(workerUrl)}`, {
       method: 'POST',
-      headers: { 
+      headers: {
+        'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
-        'x-internal-secret': process.env.INTERNAL_SECRET || 'storydream-internal'
+        'Upstash-Retries': '2',
+        'Upstash-Delay': `${i * 3}s`
       },
       body: JSON.stringify(payload)
-    }).catch(err => console.error(`Scene ${i} queue error:`, err.message))
-  })
+    })
 
-  return res.status(200).json({ queued: scenes.length })
+    const text = await response.text()
+    console.log(`Scene ${i} response ${response.status}:`, text.slice(0, 200))
+
+    if (!response.ok) throw new Error(text)
+    return JSON.parse(text)
+  }))
+
+  const failed = results.filter(r => r.status === 'rejected')
+  const succeeded = results.filter(r => r.status === 'fulfilled')
+
+  if (failed.length > 0) {
+    console.error('Failed scenes:', failed.map(f => f.reason?.message?.slice(0, 100)))
+  }
+
+  return res.status(200).json({ queued: succeeded.length, failed: failed.length })
 }
