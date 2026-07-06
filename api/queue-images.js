@@ -27,7 +27,7 @@ export default async function handler(req, res) {
       }))
     }
 
-    const response = await fetch(`https://qstash.upstash.io/v2/publish/${encodeURIComponent(workerUrl)}`, {
+    const response = await fetch(`https://qstash.upstash.io/v2/publish/${workerUrl}`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
