@@ -54,29 +54,28 @@ function CharacterForm({ initial, onSave, onCancel }) {
       setPhotoBase64(base64)
       setPhotoMime('image/jpeg')
 
-      // Auto-analyse the photo
-      if (name || initial?.name) {
-        setAnalysing(true)
-        try {
-          const res = await fetch('/api/describe-character', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              photoBase64: base64,
-              mimeType: 'image/jpeg',
-              name: name || initial?.name,
-              age: age || initial?.age
-            })
+      // Auto-analyse the photo — use name if available, otherwise analyse immediately
+      const nameToUse = name || initial?.name || 'the character'
+      setAnalysing(true)
+      try {
+        const res = await fetch('/api/describe-character', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            photoBase64: base64,
+            mimeType: 'image/jpeg',
+            name: nameToUse,
+            age: age || initial?.age
           })
-          if (res.ok) {
-            const { description: desc } = await res.json()
-            setDescription(desc)
-          }
-        } catch (err) {
-          console.error('Photo analysis failed:', err)
+        })
+        if (res.ok) {
+          const { description: desc } = await res.json()
+          setDescription(desc)
         }
-        setAnalysing(false)
+      } catch (err) {
+        console.error('Photo analysis failed:', err)
       }
+      setAnalysing(false)
     }
     reader.readAsDataURL(file)
   }
@@ -97,6 +96,16 @@ function CharacterForm({ initial, onSave, onCancel }) {
       }
     } catch {}
     setAnalysing(false)
+  }
+
+  // Auto-analyse when name is typed after photo is already uploaded
+  const handleNameChange = (val) => {
+    setName(val)
+    if (val.trim().length > 1 && photoBase64 && !description && !analysing) {
+      setTimeout(() => {
+        if (val.trim().length > 1) handleAnalyse()
+      }, 800)
+    }
   }
 
   const valid = name.trim().length > 0
@@ -138,7 +147,7 @@ function CharacterForm({ initial, onSave, onCancel }) {
         </div>
       </div>
 
-      <Input label="Name *" value={name} onChange={setName} placeholder="e.g. Beau" />
+      <Input label="Name *" value={name} onChange={handleNameChange} placeholder="e.g. Beau" />
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Input label="Age" value={age} onChange={setAge} placeholder="e.g. 7" type="number" />
