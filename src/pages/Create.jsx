@@ -66,26 +66,56 @@ export default function Create() {
       const story = await storyRes.json()
 
       setGenStep(1)
-      setGenDetail(`Story written — ${story.scenes.length} scenes ready. Queueing illustrations…`)
+      setGenDetail(`Story written — ${story.scenes.length} scenes ready. Illustrating…`)
 
       const id = uuidv4()
+      const charPayload = chosenChars.map(c => ({ name: c.name, photoBase64: c.photoBase64 || null, photoMime: c.photoMime || 'image/jpeg', description: c.description || null }))
 
-      // Step 2: Queue image jobs via QStash — non-blocking, each runs independently
+      // Step 2: Generate first 2 scenes synchronously so user sees images immediately
       setGenStep(2)
-      setGenDetail('Sending scenes to be illustrated in the background…')
-      try {
-        await fetch('/api/queue-images', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            storyId: id,
-            scenes: story.scenes,
-            style,
-            characters: chosenChars.map(c => ({ name: c.name, photoBase64: c.photoBase64 || null, photoMime: c.photoMime || 'image/jpeg', description: c.description || null }))
+      const immediateScenes = story.scenes.slice(0, 2)
+      const deferredScenes = story.scenes.slice(2)
+
+      setGenDetail(`Illustrating scenes 1–${immediateScenes.length} of ${story.scenes.length}…`)
+      await Promise.all(immediateScenes.map(async (scene, i) => {
+        try {
+          const imgRes = await fetch('/api/generate-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              imagePrompt: scene.imagePrompt,
+              style,
+              storyId: id,
+              sceneIndex: i,
+              characters: charPayload
+            })
           })
-        })
-      } catch (err) {
-        console.error('Failed to queue images:', err)
+          if (imgRes.ok) {
+            const { imageUrl } = await imgRes.json()
+            scene.imageUrl = imageUrl
+          }
+        } catch (err) {
+          console.error(`Scene ${i} failed:`, err)
+        }
+      }))
+
+      // Queue remaining scenes in the background
+      if (deferredScenes.length > 0) {
+        setGenDetail(`Queueing remaining ${deferredScenes.length} scenes…`)
+        try {
+          await fetch('/api/queue-images', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              storyId: id,
+              scenes: deferredScenes.map((s, i) => ({ ...s, sceneIndex: i + 2 })),
+              style,
+              characters: charPayload
+            })
+          })
+        } catch (err) {
+          console.error('Failed to queue remaining images:', err)
+        }
       }
 
       setGenStep(3)

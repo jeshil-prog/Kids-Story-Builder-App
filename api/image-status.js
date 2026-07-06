@@ -12,11 +12,16 @@ export default async function handler(req, res) {
   for (let i = 0; i < count; i++) {
     const key = `story:${storyId}:scene:${i}`
     try {
-      const res2 = await fetch(`${process.env.UPSTASH_REDIS_REST_URL}/get/${encodeURIComponent(key)}`, {
-        headers: { Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}` }
+      const r = await fetch(`${process.env.UPSTASH_REDIS_REST_URL}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(['GET', key])
       })
-      const data = await res2.json()
-      const value = data.result ? JSON.parse(decodeURIComponent(data.result)) : null
+      const data = await r.json()
+      const value = data.result ? JSON.parse(data.result) : null
       results.push(value)
     } catch {
       results.push(null)

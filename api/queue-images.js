@@ -16,7 +16,7 @@ export default async function handler(req, res) {
   const results = await Promise.allSettled(scenes.map(async (scene, i) => {
     const payload = {
       storyId,
-      sceneIndex: i,
+      sceneIndex: scene.sceneIndex !== undefined ? scene.sceneIndex : i,
       imagePrompt: scene.imagePrompt,
       style,
       characters: characters.map(c => ({
