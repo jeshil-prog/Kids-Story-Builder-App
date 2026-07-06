@@ -75,7 +75,7 @@ export default function Create() {
       setGenStep(2)
       for (let i = 0; i < story.scenes.length; i++) {
         const scene = story.scenes[i]
-        setGenDetail(\`Painting scene \${i + 1} of \${story.scenes.length}… 🎨\`)
+        setGenDetail(`Painting scene ${i + 1} of ${story.scenes.length}… 🎨`)
         try {
           const imgRes = await fetch('/api/generate-image', {
             method: 'POST',
@@ -93,7 +93,7 @@ export default function Create() {
             scene.imageUrl = imageUrl
           }
         } catch (err) {
-          console.error(\`Scene \${i} failed:\`, err)
+          console.error(`Scene ${i} failed:`, err)
         }
       }
 
