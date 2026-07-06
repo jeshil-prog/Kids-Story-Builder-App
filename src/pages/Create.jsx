@@ -66,18 +66,16 @@ export default function Create() {
       const story = await storyRes.json()
 
       setGenStep(1)
-      setGenDetail(`Story written — ${story.scenes.length} scenes ready. Illustrating…`)
+      setGenDetail(`The magic is beginning… ${story.scenes.length} scenes to illustrate!`)
 
       const id = uuidv4()
       const charPayload = chosenChars.map(c => ({ name: c.name, photoBase64: c.photoBase64 || null, photoMime: c.photoMime || 'image/jpeg', description: c.description || null }))
 
-      // Step 2: Generate first 2 scenes synchronously so user sees images immediately
+      // Step 2: Generate all images one at a time before navigating
       setGenStep(2)
-      const immediateScenes = story.scenes.slice(0, 2)
-      const deferredScenes = story.scenes.slice(2)
-
-      setGenDetail(`Illustrating scenes 1–${immediateScenes.length} of ${story.scenes.length}…`)
-      await Promise.all(immediateScenes.map(async (scene, i) => {
+      for (let i = 0; i < story.scenes.length; i++) {
+        const scene = story.scenes[i]
+        setGenDetail(\`Painting scene \${i + 1} of \${story.scenes.length}… 🎨\`)
         try {
           const imgRes = await fetch('/api/generate-image', {
             method: 'POST',
@@ -95,31 +93,12 @@ export default function Create() {
             scene.imageUrl = imageUrl
           }
         } catch (err) {
-          console.error(`Scene ${i} failed:`, err)
-        }
-      }))
-
-      // Queue remaining scenes in the background
-      if (deferredScenes.length > 0) {
-        setGenDetail(`Queueing remaining ${deferredScenes.length} scenes…`)
-        try {
-          await fetch('/api/queue-images', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              storyId: id,
-              scenes: deferredScenes.map((s, i) => ({ ...s, sceneIndex: i + 2 })),
-              style,
-              characters: charPayload
-            })
-          })
-        } catch (err) {
-          console.error('Failed to queue remaining images:', err)
+          console.error(\`Scene \${i} failed:\`, err)
         }
       }
 
       setGenStep(3)
-      setGenDetail('Saving your story…')
+      setGenDetail('Wrapping up your magical story… almost there! ✨')
 
 
       const fullStory = {
@@ -137,29 +116,91 @@ export default function Create() {
     }
   }
 
+  const MAGIC_MESSAGES = [
+    { emoji: '🪄', text: 'Sprinkling story dust…' },
+    { emoji: '🌟', text: 'Waking up the characters…' },
+    { emoji: '🎨', text: 'Mixing magical paint colours…' },
+    { emoji: '🦄', text: 'Calling in the unicorns…' },
+    { emoji: '🌈', text: 'Finding the perfect rainbow…' },
+    { emoji: '✨', text: 'Polishing every star…' },
+    { emoji: '🧚', text: 'The fairies are drawing…' },
+    { emoji: '🏰', text: 'Building the enchanted world…' },
+    { emoji: '🐉', text: 'The dragon is painting…' },
+    { emoji: '🌙', text: 'Almost ready for bedtime…' },
+  ]
+
+  const magicIndex = Math.min(genStep, MAGIC_MESSAGES.length - 1)
+  const magic = MAGIC_MESSAGES[magicIndex]
+
   if (generating) {
     return (
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 28, padding: 40 }}>
-        <Spinner size={52} />
-        <div style={{ textAlign: 'center' }}>
-          <p style={{ fontSize: 18, fontWeight: 600, marginBottom: 6 }}>Crafting your story…</p>
-          <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>{genDetail}</p>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 0, padding: 32, background: 'var(--surface-0)', position: 'relative', overflow: 'hidden' }}>
+        {/* Floating stars animation */}
+        <style>{`
+          @keyframes float1 { 0%,100%{transform:translate(0,0) rotate(0deg)} 50%{transform:translate(10px,-20px) rotate(180deg)} }
+          @keyframes float2 { 0%,100%{transform:translate(0,0) rotate(0deg)} 50%{transform:translate(-15px,-15px) rotate(-180deg)} }
+          @keyframes float3 { 0%,100%{transform:translate(0,0) rotate(0deg)} 50%{transform:translate(8px,-25px) rotate(270deg)} }
+          @keyframes float4 { 0%,100%{transform:translate(0,0) scale(1)} 50%{transform:translate(-10px,-10px) scale(1.3)} }
+          @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+          @keyframes bounce { 0%,100%{transform:scale(1)} 50%{transform:scale(1.15)} }
+          @keyframes shimmer { 0%,100%{opacity:0.4} 50%{opacity:1} }
+          @keyframes drift { 0%{transform:translateY(100vh) rotate(0deg);opacity:0} 10%{opacity:1} 90%{opacity:1} 100%{transform:translateY(-20px) rotate(720deg);opacity:0} }
+        `}</style>
+
+        {/* Drifting background particles */}
+        {['⭐','🌟','✨','💫','🌙','⭐','✨','🌟'].map((s, i) => (
+          <div key={i} style={{
+            position: 'absolute',
+            left: `${10 + i * 12}%`,
+            fontSize: `${12 + (i % 3) * 6}px`,
+            animation: `drift ${4 + i * 0.7}s ease-in-out ${i * 0.4}s infinite`,
+            pointerEvents: 'none',
+            opacity: 0
+          }}>{s}</div>
+        ))}
+
+        {/* Main emoji */}
+        <div style={{ fontSize: 72, marginBottom: 24, animation: 'bounce 1.5s ease-in-out infinite' }}>
+          {magic.emoji}
         </div>
-        <div style={{ width: '100%', maxWidth: 340, display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+        {/* Magic message */}
+        <p style={{ fontSize: 22, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8, textAlign: 'center' }}>
+          {magic.text}
+        </p>
+        <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 32, textAlign: 'center', maxWidth: 280 }}>
+          {genDetail}
+        </p>
+
+        {/* Progress dots */}
+        <div style={{ display: 'flex', gap: 10, marginBottom: 32 }}>
+          {GEN_STEPS.map((_, i) => (
+            <div key={i} style={{
+              width: i === genStep ? 24 : 8,
+              height: 8, borderRadius: 4,
+              background: i < genStep ? '#1D9E75' : i === genStep ? '#534AB7' : 'var(--border-strong)',
+              transition: 'all 0.4s ease',
+              animation: i === genStep ? 'shimmer 1s ease-in-out infinite' : undefined
+            }} />
+          ))}
+        </div>
+
+        {/* Step labels */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: 300 }}>
           {GEN_STEPS.map((step, i) => (
-            <div key={step} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{
-                width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-                background: i < genStep ? '#1D9E75' : i === genStep ? '#534AB7' : 'var(--border-strong)',
-                animation: i === genStep ? 'pulse 1.2s ease infinite' : undefined
-              }} />
-              <span style={{ fontSize: 13, color: i <= genStep ? 'var(--text-primary)' : 'var(--text-muted)' }}>{step}</span>
-              {i < genStep && <span style={{ marginLeft: 'auto', fontSize: 12, color: '#1D9E75' }}>✓</span>}
+            <div key={step} style={{ display: 'flex', alignItems: 'center', gap: 10, opacity: i > genStep ? 0.35 : 1, transition: 'opacity 0.4s' }}>
+              <span style={{ fontSize: 16 }}>
+                {i < genStep ? '✅' : i === genStep ? '⏳' : '⬜'}
+              </span>
+              <span style={{ fontSize: 13, color: i <= genStep ? 'var(--text-primary)' : 'var(--text-muted)', fontWeight: i === genStep ? 600 : 400 }}>
+                {step}
+              </span>
             </div>
           ))}
         </div>
+
         {error && (
-          <div style={{ background: '#FCEBEB', border: '1px solid #F09595', borderRadius: 12, padding: '12px 16px', color: '#501313', fontSize: 13, maxWidth: 340, textAlign: 'center' }}>
+          <div style={{ background: '#FCEBEB', border: '1px solid #F09595', borderRadius: 12, padding: '12px 16px', color: '#501313', fontSize: 13, maxWidth: 340, textAlign: 'center', marginTop: 24 }}>
             {error}
             <br/>
             <button onClick={() => { setGenerating(false); setError(null) }} style={{ marginTop: 8, color: '#A32D2D', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13 }}>Go back</button>
