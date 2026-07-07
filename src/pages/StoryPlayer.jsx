@@ -353,14 +353,14 @@ export default function StoryPlayer() {
 
       {/* Scene */}
       <div style={{ flex: 1, display: 'flex', alignItems: 'stretch', justifyContent: 'center', overflow: 'hidden' }}>
-        <div style={{ width: '100%', maxWidth: projector ? '100%' : 900, background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: projector ? 0 : 16, overflow: 'hidden', display: 'flex', flexDirection: 'column', height: projector ? '100dvh' : 'auto' }}>
+        <div style={{ width: '100%', maxWidth: projector ? '100%' : 900, background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: projector ? 0 : 16, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
 
           {/* Scene: parchment scroll + image side by side, seamlessly joined */}
-          <div style={{ width: '100%', flex: 1, display: 'flex', flexDirection: projector ? 'row' : 'column', overflow: projector ? 'hidden' : 'auto', background: '#1a1830', minHeight: projector ? 0 : 320 }}>
+          <div style={{ width: '100%', flex: 1, display: 'flex', overflow: 'hidden', background: '#1a1830', minHeight: 320 }}>
 
             {/* Left: parchment scroll — height driven by content, image matches */}
             <div style={{
-              width: projector ? '38%' : '100%',
+              width: projector ? '38%' : '42%',
               flexShrink: 0,
               background: 'linear-gradient(175deg, #f7ecd4 0%, #eedcb2 50%, #e8d49e 100%)',
               display: 'flex', flexDirection: 'column',
@@ -397,13 +397,13 @@ export default function StoryPlayer() {
             </div>
 
             {/* Right: full illustration, always fills height */}
-            <div style={{ flex: 1, position: 'relative', marginLeft: projector ? -2 : 0, minHeight: projector ? 0 : 260, overflow: 'hidden' }}>
-              {current?.imageData ? (
+            <div style={{ flex: 1, position: 'relative', marginLeft: -2, minHeight: 280, overflow: 'hidden' }}>
+              {(current?.imageUrl || current?.imageData) ? (
                 <img
-                  key={`${scene}-${current.imageData?.slice(0,10)}`}
-                  src={`data:${current.imageType || 'image/png'};base64,${current.imageData}`}
+                  key={`${scene}-${(current.imageUrl || current.imageData)?.slice(0,10)}`}
+                  src={current.imageUrl || `data:${current.imageType || 'image/png'};base64,${current.imageData}`}
                   alt={`Scene ${scene + 1}`}
-                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center 20%', animation: 'fadeIn 0.6s ease', display: 'block' }}
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top', animation: 'fadeIn 0.6s ease', display: 'block' }}
                 />
               ) : (
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: 'rgba(255,255,255,0.25)', gap: 8 }}>
@@ -429,7 +429,7 @@ export default function StoryPlayer() {
               <div key={i} onClick={() => { stopAudio(); setScene(i) }} style={{
                 height: 6, borderRadius: 3, cursor: 'pointer', transition: 'all 0.2s',
                 width: i === scene ? 20 : 6,
-                background: i === scene ? '#7F77DD' : sc.imageData ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.15)'
+                background: i === scene ? '#7F77DD' : (sc.imageData || sc.imageUrl) ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.15)'
               }} />
             ))}
           </div>
