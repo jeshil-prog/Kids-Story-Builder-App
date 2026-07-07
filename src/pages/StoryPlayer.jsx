@@ -18,11 +18,12 @@ export default function StoryPlayer() {
   const { getStory, saveStory } = useStore()
   const [story, setStory] = useState(null)
   const [scene, setScene] = useState(0)
-  const isWide = () => window.innerWidth >= 700 && window.innerHeight >= 500
-  const [projector, setProjector] = useState(isWide)
+  const isLandscape = () => window.innerWidth > window.innerHeight
+  const [projector, setProjector] = useState(true)
+  const [landscape, setLandscape] = useState(isLandscape)
 
   useEffect(() => {
-    const handleResize = () => setProjector(isWide())
+    const handleResize = () => setLandscape(isLandscape())
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
   }, [])
@@ -313,6 +314,18 @@ export default function StoryPlayer() {
     }
   }, [stopAudio])
 
+  if (!landscape) {
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, padding: 40, background: '#0d0b1a' }}>
+        <div style={{ fontSize: 64 }}>📖</div>
+        <p style={{ fontSize: 20, fontWeight: 600, color: 'white', textAlign: 'center', margin: 0 }}>Rotate your device</p>
+        <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)', textAlign: 'center', maxWidth: 240, margin: 0, lineHeight: 1.6 }}>
+          Stories look best in landscape mode. Turn your phone sideways to begin reading!
+        </p>
+      </div>
+    )
+  }
+
   if (!story) return (
     <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16, padding: 40 }}>
       <p style={{ fontSize: 28 }}>📖</p>
@@ -355,8 +368,8 @@ export default function StoryPlayer() {
       <div style={{ flex: 1, display: 'flex', alignItems: 'stretch', justifyContent: 'center', overflow: 'hidden' }}>
         <div style={{ width: '100%', maxWidth: projector ? '100%' : 900, background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: projector ? 0 : 16, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
 
-          {/* Scene: parchment scroll + image side by side, seamlessly joined */}
-          <div style={{ width: '100%', flex: 1, display: 'flex', overflow: 'hidden', background: '#1a1830', minHeight: 320 }}>
+          {/* Scene: parchment scroll + image — stacked on mobile, side by side on desktop */}
+          <div style={{ width: '100%', flex: 1, display: 'flex', flexDirection: 'row', overflow: 'hidden', background: '#1a1830', minHeight: 0 }}>
 
             {/* Left: parchment scroll — height driven by content, image matches */}
             <div style={{
