@@ -339,7 +339,9 @@ export default function StoryPlayer() {
 
   return (
     <div style={{
-      flex: 1, display: 'flex', flexDirection: 'column', background: '#0d0b1a',
+      display: 'flex', flexDirection: 'column', background: '#0d0b1a',
+      height: '100dvh', maxHeight: '100dvh',
+      paddingLeft: 'env(safe-area-inset-left, 0px)', paddingRight: 'env(safe-area-inset-right, 0px)',
       ...(projector ? { position: 'fixed', inset: 0, zIndex: 9999 } : {})
     }}>
       {/* Top bar */}
@@ -369,11 +371,11 @@ export default function StoryPlayer() {
         <div style={{ width: '100%', maxWidth: projector ? '100%' : 900, background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: projector ? 0 : 16, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
 
           {/* Scene: parchment scroll + image — stacked on mobile, side by side on desktop */}
-          <div style={{ width: '100%', flex: 1, display: 'flex', flexDirection: 'row', overflow: 'hidden', background: '#1a1830', minHeight: 0 }}>
+          <div style={{ width: '100%', flex: 1, display: 'flex', flexDirection: 'row', overflow: 'hidden', background: '#1a1830', minHeight: 0, maxHeight: '100%' }}>
 
             {/* Left: parchment scroll — height driven by content, image matches */}
             <div style={{
-              width: projector ? '38%' : '42%',
+              width: projector ? '35%' : '40%',
               flexShrink: 0,
               background: 'linear-gradient(175deg, #f7ecd4 0%, #eedcb2 50%, #e8d49e 100%)',
               display: 'flex', flexDirection: 'column',
