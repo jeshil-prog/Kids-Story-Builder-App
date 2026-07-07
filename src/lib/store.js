@@ -4,21 +4,15 @@ import { v4 as uuidv4 } from 'uuid'
 // Safe localStorage save — strips large base64 data to avoid quota errors
 const saveCharacters = (chars) => {
   try {
-    // Photos are compressed to ~50-100KB before upload so safe to store in full
-    // photoBase64 is derived from photo so we can restore it on load
+    // Strip photo base64 before saving — keep only the small thumbnail data URL
     const slim = chars.map(c => ({
       ...c,
-      photoBase64: c.photo ? c.photo.split(',')[1] : null,  // derive from compressed photo
-      photoMime: 'image/jpeg'
+      photoBase64: undefined,  // don't store raw base64
+      photo: c.photo ? c.photo.slice(0, 2000) : null  // keep tiny thumbnail only
     }))
     localStorage.setItem('sd_characters', JSON.stringify(slim))
   } catch (e) {
     console.warn('Could not save characters:', e.message)
-    // If quota exceeded, save without photos
-    try {
-      const noPhotos = chars.map(c => ({ ...c, photo: null, photoBase64: null }))
-      localStorage.setItem('sd_characters', JSON.stringify(noPhotos))
-    } catch {}
   }
 }
 
@@ -46,6 +40,9 @@ const saveStories = (stories) => {
 
 const loadImages = (storyId, scenes) => {
   return scenes.map((scene, i) => {
+    // If scene already has S3 imageUrl, use it — no need to load from localStorage
+    if (scene.imageUrl) return scene
+    // Fall back to legacy localStorage base64 images
     try {
       const raw = localStorage.getItem(`sd_img_${storyId}_${i}`)
       if (raw) {
