@@ -21,12 +21,31 @@ export default function StoryPlayer() {
   const isLandscape = () => window.innerWidth > window.innerHeight
   const [projector, setProjector] = useState(true)
   const [landscape, setLandscape] = useState(isLandscape)
+  // Real viewport height in px. iOS Safari's 100dvh doesn't reliably match the
+  // actual visible viewport when the address/tab bar is shown, which is what
+  // was leaving a dead-space gap below the story panel. Measuring innerHeight
+  // directly and re-measuring on resize/orientationchange/scroll is robust.
+  const [viewportH, setViewportH] = useState(() => window.innerHeight)
 
   useEffect(() => {
-    const handleResize = () => setLandscape(isLandscape())
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
+    const update = () => {
+      setLandscape(isLandscape())
+      setViewportH(window.innerHeight)
+    }
+    window.addEventListener('resize', update)
+    window.addEventListener('orientationchange', update)
+    // iOS toggles the address bar on scroll, which changes innerHeight
+    window.addEventListener('scroll', update, { passive: true })
+    return () => {
+      window.removeEventListener('resize', update)
+      window.removeEventListener('orientationchange', update)
+      window.removeEventListener('scroll', update)
+    }
   }, [])
+
+  // Short, wide viewport = phone in landscape. Give it a condensed chrome so
+  // the story panel gets nearly the full screen instead of fighting fixed-height UI.
+  const compact = landscape && viewportH < 560
   const [speaking, setSpeaking] = useState(false)
   const [loadingAudio, setLoadingAudio] = useState(false)
   const [generatingImages, setGeneratingImages] = useState(false)
@@ -337,72 +356,87 @@ export default function StoryPlayer() {
   const progress = ((scene + 1) / scenes.length) * 100
   const imagesReady = imageProgress
 
+  // Compact mode collapses onto a single overlay control bar (over the image)
+  // instead of separate dots/controls/caption rows underneath the panel.
+  // That was the source of the dead-space gap in landscape: those rows had a
+  // fixed height, but the panel above them wasn't reliably filling exactly
+  // "remaining space" on iOS Safari, so a gap opened up between them. With
+  // nothing but the panel below the header/progress bar, there's nothing left
+  // for a gap to appear in — the panel simply fills whatever space exists.
+  const useOverlayControls = compact || projector
+
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', background: '#0d0b1a',
-      height: '100dvh', maxHeight: '100dvh',
+      height: `${viewportH}px`, maxHeight: `${viewportH}px`,
+      paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)',
       paddingLeft: 'env(safe-area-inset-left, 0px)', paddingRight: 'env(safe-area-inset-right, 0px)',
+      boxSizing: 'border-box',
       ...(projector ? { position: 'fixed', inset: 0, zIndex: 9999 } : {})
     }}>
       {/* Top bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '0.5px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.3)' }}>
-        <button onClick={() => { stopAudio(); navigate(-1) }} style={{ background: 'rgba(255,255,255,0.1)', border: '0.5px solid rgba(255,255,255,0.15)', borderRadius: 8, color: 'rgba(255,255,255,0.7)', padding: '6px 12px', fontSize: 13, cursor: 'pointer' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: compact ? '5px 10px' : '12px 16px', borderBottom: '0.5px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.3)', flexShrink: 0 }}>
+        <button onClick={() => { stopAudio(); navigate(-1) }} style={{ background: 'rgba(255,255,255,0.1)', border: '0.5px solid rgba(255,255,255,0.15)', borderRadius: 8, color: 'rgba(255,255,255,0.7)', padding: compact ? '4px 9px' : '6px 12px', fontSize: compact ? 12 : 13, cursor: 'pointer', flexShrink: 0 }}>
             ← Back
           </button>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontSize: 14, fontWeight: 600, color: 'rgba(255,255,255,0.9)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{story.title}</p>
-          <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>
-            {story.genre} · {story.style}
-            {generatingImages && ` · 🎨 Illustrating ${imagesReady}/${scenes.length}…`}
-          </p>
+          <p style={{ fontSize: compact ? 12 : 14, fontWeight: 600, color: 'rgba(255,255,255,0.9)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: 0 }}>{story.title}</p>
+          {!compact && (
+            <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', margin: 0 }}>
+              {story.genre} · {story.style}
+              {generatingImages && ` · 🎨 Illustrating ${imagesReady}/${scenes.length}…`}
+            </p>
+          )}
         </div>
-        <button onClick={() => { stopAudio(); setProjector(p => !p) }} style={{ background: 'rgba(255,255,255,0.1)', border: '0.5px solid rgba(255,255,255,0.15)', borderRadius: 8, color: 'rgba(255,255,255,0.7)', padding: '6px 12px', fontSize: 13, cursor: 'pointer' }}>
+        <button onClick={() => { stopAudio(); setProjector(p => !p) }} style={{ background: 'rgba(255,255,255,0.1)', border: '0.5px solid rgba(255,255,255,0.15)', borderRadius: 8, color: 'rgba(255,255,255,0.7)', padding: compact ? '4px 9px' : '6px 12px', fontSize: compact ? 12 : 13, cursor: 'pointer', flexShrink: 0 }}>
           {projector ? '⊠ Exit' : '⊡ Fullscreen'}
         </button>
       </div>
 
       {/* Story progress bar */}
-      <div style={{ height: 2, background: 'rgba(255,255,255,0.06)' }}>
+      <div style={{ height: 2, background: 'rgba(255,255,255,0.06)', flexShrink: 0 }}>
         <div style={{ height: '100%', width: `${progress}%`, background: '#7F77DD', transition: 'width 0.4s' }} />
       </div>
 
       {/* Scene */}
-      <div style={{ flex: 1, display: 'flex', alignItems: 'stretch', justifyContent: 'center', overflow: 'hidden' }}>
-        <div style={{ width: '100%', maxWidth: projector ? '100%' : 900, background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: projector ? 0 : 16, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'stretch', justifyContent: 'center', overflow: 'hidden' }}>
+        <div style={{ width: '100%', maxWidth: (projector || compact) ? '100%' : 900, height: '100%', background: 'rgba(255,255,255,0.04)', border: (projector || compact) ? 'none' : '0.5px solid rgba(255,255,255,0.1)', borderRadius: (projector || compact) ? 0 : 16, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
 
-          {/* Scene: parchment scroll + image — stacked on mobile, side by side on desktop */}
-          <div style={{ width: '100%', flex: 1, display: 'flex', flexDirection: 'row', overflow: 'hidden', background: '#1a1830', minHeight: 0, maxHeight: '100%' }}>
+          {/* Scene: parchment scroll + image, side by side, fills 100% of available height */}
+          <div style={{ width: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'row', overflow: 'hidden', background: '#1a1830' }}>
 
-            {/* Left: parchment scroll — height driven by content, image matches */}
+            {/* Left: parchment — scrolls internally if narration is long, so text is never clipped */}
             <div style={{
-              width: projector ? '35%' : '40%',
+              width: compact ? '44%' : (projector ? '35%' : '40%'),
               flexShrink: 0,
               background: 'linear-gradient(175deg, #f7ecd4 0%, #eedcb2 50%, #e8d49e 100%)',
               display: 'flex', flexDirection: 'column',
-              padding: projector ? '28px 26px 24px 24px' : '18px 18px 16px 16px',
+              padding: compact ? '12px 14px 12px 12px' : (projector ? '28px 26px 24px 24px' : '18px 18px 16px 16px'),
               boxSizing: 'border-box',
               position: 'relative',
               zIndex: 2,
+              overflowY: 'auto',
+              WebkitOverflowScrolling: 'touch',
               clipPath: 'polygon(0 0, 97% 0, 100% 1.5%, 98% 3%, 100% 5%, 97% 7%, 99% 10%, 97% 13%, 100% 16%, 98% 20%, 100% 25%, 97% 30%, 100% 35%, 98% 40%, 100% 45%, 97% 50%, 100% 55%, 98% 60%, 100% 65%, 97% 70%, 100% 75%, 98% 80%, 100% 85%, 97% 90%, 100% 93%, 98% 96%, 100% 98.5%, 97% 100%, 0 100%)',
             }}>
               {/* Chapter title */}
               <p style={{
-                fontSize: projector ? 12 : 10,
+                fontSize: compact ? 10 : (projector ? 12 : 10),
                 fontWeight: 700,
                 color: '#6b4423',
                 fontFamily: 'Georgia, serif',
                 textTransform: 'uppercase',
                 letterSpacing: 1,
-                margin: '0 0 8px 0',
+                margin: '0 0 6px 0',
                 opacity: 0.8,
                 flexShrink: 0,
               }}>
                 {current?.chapter}
               </p>
-              {/* Narration — always fully visible, no clipping */}
+              {/* Narration — scrolls rather than clipping if it doesn't fit */}
               <p style={{
-                fontSize: projector ? 15 : 13,
-                lineHeight: 1.8,
+                fontSize: compact ? 12 : (projector ? 15 : 13),
+                lineHeight: 1.65,
                 color: '#2e1a08',
                 fontFamily: 'Georgia, serif',
                 margin: 0,
@@ -411,8 +445,8 @@ export default function StoryPlayer() {
               </p>
             </div>
 
-            {/* Right: full illustration, always fills height */}
-            <div style={{ flex: 1, position: 'relative', marginLeft: -2, minHeight: 280, overflow: 'hidden' }}>
+            {/* Right: full illustration, always fills height, hosts overlay controls in compact/fullscreen */}
+            <div style={{ flex: 1, position: 'relative', marginLeft: -2, minHeight: compact ? 140 : 280, overflow: 'hidden' }}>
               {(current?.imageUrl || current?.imageData) ? (
                 <img
                   key={`${scene}-${(current.imageUrl || current.imageData)?.slice(0,10)}`}
@@ -435,45 +469,89 @@ export default function StoryPlayer() {
                   )}
                 </div>
               )}
+
+              {/* Overlay controls — used in compact/mobile-landscape and fullscreen so the
+                  panel above never has to share space with a separate controls row */}
+              {useOverlayControls && (
+                <div style={{
+                  position: 'absolute', left: 0, right: 0, bottom: 0,
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: compact ? 6 : 10,
+                  padding: compact ? '10px 10px 8px' : '18px 20px 16px',
+                  background: 'linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.35) 60%, transparent 100%)',
+                }}>
+                  <div style={{ display: 'flex', gap: 5 }}>
+                    {scenes.map((sc, i) => (
+                      <div key={i} onClick={() => { stopAudio(); setScene(i) }} style={{
+                        height: 5, borderRadius: 3, cursor: 'pointer', transition: 'all 0.2s',
+                        width: i === scene ? 16 : 5,
+                        background: i === scene ? '#7F77DD' : (sc.imageData || sc.imageUrl) ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.2)'
+                      }} />
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: compact ? 8 : 12 }}>
+                    <button onClick={goPrev} disabled={scene === 0} aria-label="Previous" style={{ width: compact ? 32 : 40, height: compact ? 32 : 40, borderRadius: '50%', background: 'rgba(255,255,255,0.12)', border: '0.5px solid rgba(255,255,255,0.2)', color: 'white', cursor: scene === 0 ? 'not-allowed' : 'pointer', fontSize: compact ? 16 : 18, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: scene === 0 ? 0.4 : 1 }}>‹</button>
+
+                    <button
+                      onClick={() => speaking ? stopAudio() : playNarration()}
+                      disabled={loadingAudio}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        background: speaking ? '#3C3489' : '#534AB7',
+                        border: 'none', borderRadius: 100,
+                        color: 'white', cursor: loadingAudio ? 'wait' : 'pointer',
+                        padding: compact ? '8px 16px' : '10px 20px', fontSize: compact ? 12 : 14, fontWeight: 600,
+                        transition: 'all 0.2s', opacity: loadingAudio ? 0.7 : 1, whiteSpace: 'nowrap'
+                      }}
+                    >
+                      {loadingAudio ? '⏳' : speaking ? '⏸ Stop' : '▶ Read aloud'}
+                    </button>
+
+                    <button onClick={goNext} disabled={scene === scenes.length - 1} aria-label="Next" style={{ width: compact ? 32 : 40, height: compact ? 32 : 40, borderRadius: '50%', background: 'rgba(255,255,255,0.12)', border: '0.5px solid rgba(255,255,255,0.2)', color: 'white', cursor: scene === scenes.length - 1 ? 'not-allowed' : 'pointer', fontSize: compact ? 16 : 18, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: scene === scenes.length - 1 ? 0.4 : 1 }}>›</button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Page dots */}
-          <div style={{ display: 'flex', gap: 6, justifyContent: 'center', padding: '12px 20px' }}>
-            {scenes.map((sc, i) => (
-              <div key={i} onClick={() => { stopAudio(); setScene(i) }} style={{
-                height: 6, borderRadius: 3, cursor: 'pointer', transition: 'all 0.2s',
-                width: i === scene ? 20 : 6,
-                background: i === scene ? '#7F77DD' : (sc.imageData || sc.imageUrl) ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.15)'
-              }} />
-            ))}
-          </div>
+          {/* Below-panel controls — only when there's room to spare (desktop / tall windowed view) */}
+          {!useOverlayControls && (
+            <>
+              <div style={{ display: 'flex', gap: 6, justifyContent: 'center', padding: '12px 20px', flexShrink: 0 }}>
+                {scenes.map((sc, i) => (
+                  <div key={i} onClick={() => { stopAudio(); setScene(i) }} style={{
+                    height: 6, borderRadius: 3, cursor: 'pointer', transition: 'all 0.2s',
+                    width: i === scene ? 20 : 6,
+                    background: i === scene ? '#7F77DD' : (sc.imageData || sc.imageUrl) ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.15)'
+                  }} />
+                ))}
+              </div>
 
-          {/* Controls */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 20px 20px', justifyContent: 'center' }}>
-            <button onClick={goPrev} disabled={scene === 0} aria-label="Previous" style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.7)', cursor: scene === 0 ? 'not-allowed' : 'pointer', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: scene === 0 ? 0.4 : 1 }}>‹</button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 20px 20px', justifyContent: 'center', flexShrink: 0 }}>
+                <button onClick={goPrev} disabled={scene === 0} aria-label="Previous" style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.7)', cursor: scene === 0 ? 'not-allowed' : 'pointer', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: scene === 0 ? 0.4 : 1 }}>‹</button>
 
-            <button
-              onClick={() => speaking ? stopAudio() : playNarration()}
-              disabled={loadingAudio}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                background: speaking ? '#3C3489' : '#534AB7',
-                border: 'none', borderRadius: 100,
-                color: 'white', cursor: loadingAudio ? 'wait' : 'pointer',
-                padding: '12px 24px', fontSize: 14, fontWeight: 600,
-                transition: 'all 0.2s', opacity: loadingAudio ? 0.7 : 1
-              }}
-            >
-              {loadingAudio ? '⏳ Loading…' : speaking ? '⏸ Stop' : '▶ Read aloud'}
-            </button>
+                <button
+                  onClick={() => speaking ? stopAudio() : playNarration()}
+                  disabled={loadingAudio}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    background: speaking ? '#3C3489' : '#534AB7',
+                    border: 'none', borderRadius: 100,
+                    color: 'white', cursor: loadingAudio ? 'wait' : 'pointer',
+                    padding: '12px 24px', fontSize: 14, fontWeight: 600,
+                    transition: 'all 0.2s', opacity: loadingAudio ? 0.7 : 1
+                  }}
+                >
+                  {loadingAudio ? '⏳ Loading…' : speaking ? '⏸ Stop' : '▶ Read aloud'}
+                </button>
 
-            <button onClick={goNext} disabled={scene === scenes.length - 1} aria-label="Next" style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.7)', cursor: scene === scenes.length - 1 ? 'not-allowed' : 'pointer', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: scene === scenes.length - 1 ? 0.4 : 1 }}>›</button>
-          </div>
+                <button onClick={goNext} disabled={scene === scenes.length - 1} aria-label="Next" style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.7)', cursor: scene === scenes.length - 1 ? 'not-allowed' : 'pointer', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: scene === scenes.length - 1 ? 0.4 : 1 }}>›</button>
+              </div>
 
-          <p style={{ textAlign: 'center', fontSize: 11, color: 'rgba(255,255,255,0.3)', paddingBottom: 16 }}>
-            {scene + 1} of {scenes.length} · Space to play · ← → to navigate
-          </p>
+              <p style={{ textAlign: 'center', fontSize: 11, color: 'rgba(255,255,255,0.3)', paddingBottom: 16, flexShrink: 0 }}>
+                {scene + 1} of {scenes.length} · Space to play · ← → to navigate
+              </p>
+            </>
+          )}
         </div>
       </div>
 
