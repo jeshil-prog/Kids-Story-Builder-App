@@ -18,11 +18,9 @@ export default function StoryPlayer() {
   const { getStory, saveStory } = useStore()
   const [story, setStory] = useState(null)
   const [scene, setScene] = useState(0)
-  // True wide layout only on tablet/desktop — not phones in landscape
   const isWide = () => window.innerWidth >= 700 && window.innerHeight >= 500
   const [projector, setProjector] = useState(isWide)
 
-  // Auto-switch layout on resize/rotation
   useEffect(() => {
     const handleResize = () => setProjector(isWide())
     window.addEventListener('resize', handleResize)
@@ -46,38 +44,6 @@ export default function StoryPlayer() {
       startImageGeneration(s)
     }
   }, [id])
-
-  // Poll for background-generated images from S3
-  useEffect(() => {
-    if (!story?.id) return
-    const hasPending = story.scenes.some(s => !s.imageUrl && !s.imageData)
-    if (!hasPending) return
-
-    let cancelled = false
-    const poll = async () => {
-      if (cancelled) return
-      try {
-        const res = await fetch(`/api/image-status?storyId=${story.id}&sceneCount=${story.scenes.length}`)
-        if (!res.ok || cancelled) return
-        const { scenes: statuses } = await res.json()
-        let anyUpdated = false
-        const updatedScenes = story.scenes.map((scene, i) => {
-          if (statuses[i]?.status === 'done' && statuses[i].imageUrl && !scene.imageUrl) {
-            anyUpdated = true
-            return { ...scene, imageUrl: statuses[i].imageUrl }
-          }
-          return scene
-        })
-        if (anyUpdated) setStory(prev => ({ ...prev, scenes: updatedScenes }))
-        const stillPending = statuses.filter(s => !s || s.status === 'processing').length
-        if (stillPending > 0 && !cancelled) setTimeout(poll, 3000)
-      } catch (err) {
-        console.error('Image polling error:', err)
-      }
-    }
-    const timer = setTimeout(poll, 2000)
-    return () => { cancelled = true; clearTimeout(timer) }
-  }, [story?.id])
 
   const startImageGeneration = async (s) => {
     if (imageGenRef.current) return
@@ -387,29 +353,26 @@ export default function StoryPlayer() {
 
       {/* Scene */}
       <div style={{ flex: 1, display: 'flex', alignItems: 'stretch', justifyContent: 'center', overflow: 'hidden' }}>
-        <div style={{ width: '100%', maxWidth: projector ? '100%' : 900, background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: projector ? 0 : 16, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ width: '100%', maxWidth: projector ? '100%' : 900, background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: projector ? 0 : 16, overflow: 'hidden', display: 'flex', flexDirection: 'column', height: projector ? '100dvh' : 'auto' }}>
 
-          {/* Scene: responsive layout — side-by-side on wide screens, stacked on mobile */}
-          <div style={{ width: '100%', flex: 1, display: 'flex', flexDirection: projector ? 'row' : 'column', overflow: 'hidden', background: '#1a1830' }}>
+          {/* Scene: parchment scroll + image side by side, seamlessly joined */}
+          <div style={{ width: '100%', flex: 1, display: 'flex', flexDirection: projector ? 'row' : 'column', overflow: projector ? 'hidden' : 'auto', background: '#1a1830', minHeight: projector ? 0 : 320 }}>
 
-            {/* Parchment scroll */}
+            {/* Left: parchment scroll — height driven by content, image matches */}
             <div style={{
               width: projector ? '38%' : '100%',
               flexShrink: 0,
               background: 'linear-gradient(175deg, #f7ecd4 0%, #eedcb2 50%, #e8d49e 100%)',
               display: 'flex', flexDirection: 'column',
-              padding: projector ? '28px 26px 24px 24px' : '16px 18px',
+              padding: projector ? '28px 26px 24px 24px' : '18px 18px 16px 16px',
               boxSizing: 'border-box',
               position: 'relative',
               zIndex: 2,
-              // Torn edge only on right side in landscape, bottom edge in portrait
-              clipPath: projector
-                ? 'polygon(0 0, 97% 0, 100% 1.5%, 98% 3%, 100% 5%, 97% 7%, 99% 10%, 97% 13%, 100% 16%, 98% 20%, 100% 25%, 97% 30%, 100% 35%, 98% 40%, 100% 45%, 97% 50%, 100% 55%, 98% 60%, 100% 65%, 97% 70%, 100% 75%, 98% 80%, 100% 85%, 97% 90%, 100% 93%, 98% 96%, 100% 98.5%, 97% 100%, 0 100%)'
-                : 'polygon(0 0, 100% 0, 100% 95%, 98% 97%, 100% 98.5%, 97% 100%, 95% 98%, 92% 100%, 89% 97%, 86% 100%, 83% 98%, 80% 100%, 77% 97%, 74% 100%, 71% 98%, 68% 100%, 65% 97%, 62% 100%, 59% 98%, 56% 100%, 53% 97%, 50% 100%, 47% 98%, 44% 100%, 41% 97%, 38% 100%, 35% 98%, 32% 100%, 29% 97%, 26% 100%, 23% 98%, 20% 100%, 17% 97%, 14% 100%, 11% 98%, 8% 100%, 5% 97%, 2% 100%, 0 98%)',
+              clipPath: 'polygon(0 0, 97% 0, 100% 1.5%, 98% 3%, 100% 5%, 97% 7%, 99% 10%, 97% 13%, 100% 16%, 98% 20%, 100% 25%, 97% 30%, 100% 35%, 98% 40%, 100% 45%, 97% 50%, 100% 55%, 98% 60%, 100% 65%, 97% 70%, 100% 75%, 98% 80%, 100% 85%, 97% 90%, 100% 93%, 98% 96%, 100% 98.5%, 97% 100%, 0 100%)',
             }}>
               {/* Chapter title */}
               <p style={{
-                fontSize: projector ? 12 : 11,
+                fontSize: projector ? 12 : 10,
                 fontWeight: 700,
                 color: '#6b4423',
                 fontFamily: 'Georgia, serif',
@@ -421,27 +384,26 @@ export default function StoryPlayer() {
               }}>
                 {current?.chapter}
               </p>
-              {/* Narration */}
+              {/* Narration — always fully visible, no clipping */}
               <p style={{
-                fontSize: projector ? 15 : 14,
+                fontSize: projector ? 15 : 13,
                 lineHeight: 1.8,
                 color: '#2e1a08',
                 fontFamily: 'Georgia, serif',
                 margin: 0,
-                paddingBottom: projector ? 0 : 8,
               }}>
                 {current?.narration}
               </p>
             </div>
 
-            {/* Illustration */}
-            <div style={{ flex: 1, position: 'relative', minHeight: projector ? 280 : 260, overflow: 'hidden', marginTop: projector ? 0 : -8 }}>
-              {(current?.imageUrl || current?.imageData) ? (
+            {/* Right: full illustration, always fills height */}
+            <div style={{ flex: 1, position: 'relative', marginLeft: projector ? -2 : 0, minHeight: projector ? 0 : 260, overflow: 'hidden' }}>
+              {current?.imageData ? (
                 <img
                   key={`${scene}-${current.imageData?.slice(0,10)}`}
-                  src={current.imageUrl || `data:${current.imageType || 'image/png'};base64,${current.imageData}`}
+                  src={`data:${current.imageType || 'image/png'};base64,${current.imageData}`}
                   alt={`Scene ${scene + 1}`}
-                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top', animation: 'fadeIn 0.6s ease', display: 'block' }}
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center 20%', animation: 'fadeIn 0.6s ease', display: 'block' }}
                 />
               ) : (
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: 'rgba(255,255,255,0.25)', gap: 8 }}>
