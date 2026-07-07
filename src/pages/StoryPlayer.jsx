@@ -403,7 +403,7 @@ export default function StoryPlayer() {
                   key={`${scene}-${(current.imageUrl || current.imageData)?.slice(0,10)}`}
                   src={current.imageUrl || `data:${current.imageType || 'image/png'};base64,${current.imageData}`}
                   alt={`Scene ${scene + 1}`}
-                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top', animation: 'fadeIn 0.6s ease', display: 'block' }}
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center 30%', animation: 'fadeIn 0.6s ease', display: 'block' }}
                 />
               ) : (
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: 'rgba(255,255,255,0.25)', gap: 8 }}>
