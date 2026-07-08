@@ -10,11 +10,12 @@
 //   3. Subscribe to: response.completed, response.failed, response.incomplete
 //   4. Copy the signing secret into the OPENAI_WEBHOOK_SECRET env var in Vercel
 
-export const config = { api: { bodyParser: false }, maxDuration: 30 }
+export const config = { api: { bodyParser: false }, maxDuration: 45 }
 
 import OpenAI from 'openai'
 import { redisGet, redisSet } from './_lib/redis.js'
 import { uploadToS3 } from './_lib/s3.js'
+import { submitImageJob } from './_lib/imageJob.js'
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -86,17 +87,18 @@ export default async function handler(req, res) {
 
   if (event.type === 'response.failed' || event.type === 'response.incomplete') {
     let detail = event.type
+    let errorCode = null
     try {
       // The webhook event itself has no explanation — retrieve the actual
       // response to get the real reason (moderation block, content filter,
-      // token limit, etc.), and log it loudly. Previously this branch logged
-      // nothing at all, so a failed/incomplete job looked identical to a
-      // success in the access logs (both just "200 POST") — this is why
-      // repeated log checks kept turning up clean.
+      // token limit, rate limit, etc.), and log it loudly. Previously this
+      // branch logged nothing at all, so a failed/incomplete job looked
+      // identical to a success in the access logs (both just "200 POST").
       const failedResponse = await openai.responses.retrieve(responseId)
       detail = failedResponse.error?.message
         || failedResponse.incomplete_details?.reason
         || event.type
+      errorCode = failedResponse.error?.code || null
       console.error('Image job failed/incomplete:', {
         responseId,
         eventType: event.type,
@@ -107,8 +109,40 @@ export default async function handler(req, res) {
     } catch (err) {
       console.error('Image job failed/incomplete (could not retrieve details):', event.type, err.message)
     }
+
+    // Confirmed root cause of nearly every earlier "scene timed out" report:
+    // OpenAI allows only 5/min image requests with input images (reference
+    // photos). One bounded retry happens right here, safely within this
+    // function's time budget — NOT a long backoff sleep, since Vercel caps
+    // function duration (as low as 60s on Hobby, hard limit, no exceptions)
+    // and a multi-stage backoff (15s/30s/60s/90s...) would risk exceeding
+    // that. If this one retry also gets rate-limited, StoryPlayer's backfill
+    // poller takes over and retries again later, driven by the client
+    // instead of a long-running function — safe on any plan, any number of
+    // attempts, since the reader isn't blocked waiting on this anymore.
+    const isRateLimit = errorCode === 'rate_limit_exceeded'
+    if (isRateLimit && jobMeta.originalParams && !jobMeta.retryCount) {
+      const suggestedMatch = detail.match(/try again in (\d+)s/i)
+      const suggestedSeconds = suggestedMatch ? parseInt(suggestedMatch[1], 10) : 15
+      const safeDelayMs = Math.min(Math.max(suggestedSeconds, 5), 25) * 1000
+
+      console.log(`Rate-limited — retrying scene ${sceneIndex} of story ${storyId} in ${safeDelayMs / 1000}s`)
+      try {
+        await redisSet(`openai_job:${responseId}`, { ...jobMeta, retryCount: 1 }, 3600)
+        await new Promise((r) => setTimeout(r, safeDelayMs))
+        const retryResponse = await submitImageJob(jobMeta.originalParams)
+        // Carry the retry count forward so if THIS attempt also fails, we
+        // don't loop again from inside a webhook — the client takes over.
+        await redisSet(`openai_job:${retryResponse.id}`, { ...jobMeta, retryCount: 1 }, 3600)
+        return res.status(200).json({ ok: true, retried: true, newJobId: retryResponse.id })
+      } catch (retryErr) {
+        console.error('Retry submission failed:', retryErr.message)
+        // fall through to recording the error below
+      }
+    }
+
     try {
-      await redisSet(sceneKey, { status: 'error', error: detail }, 3600)
+      await redisSet(sceneKey, { status: 'error', error: detail, errorCode }, 3600)
     } catch (err) {
       console.error('Failed to write error status to Redis:', err.message)
     }

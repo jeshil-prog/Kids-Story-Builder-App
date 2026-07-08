@@ -23,8 +23,7 @@ const LENGTHS = [
 const GEN_STEPS = [
   'Writing your story',
   'Splitting into scenes',
-  'Illustrating scene',
-  'Finishing up',
+  'Sending scenes off to be illustrated',
 ]
 
 export default function Create() {
@@ -69,73 +68,41 @@ export default function Create() {
       setGenDetail(`The magic is beginning… ${story.scenes.length} scenes to illustrate!`)
 
       const id = uuidv4()
-      const charPayload = chosenChars.map(c => ({ name: c.name, photoBase64: c.photoBase64 || null, photoMime: c.photoMime || 'image/jpeg', description: c.description || null }))
 
       // Step 2: Submit all scene image jobs (async — each returns almost
       // instantly, actual generation finishes later via OpenAI's webhook).
-      // Staggered slightly so we don't fire N simultaneous requests at OpenAI.
+      // Submitted all at once, no artificial stagger. OpenAI's 5/min limit on
+      // input-image requests means several of these will predictably come
+      // back rate-limited — that's fine and expected, not an error: the
+      // webhook's retry-with-backoff logic (in webhook-openai-image.js)
+      // absorbs that automatically. Naturally spreading retries over time
+      // adapts to whatever the real limit is, rather than us guessing a fixed
+      // interval up front.
+      //
+      // Deliberately NOT waiting for any of this before navigating — the
+      // reader lands on the story immediately once the text is ready, and
+      // StoryPlayer holds at whichever scene is currently loaded until the
+      // next one's image arrives, rather than making the user sit on this
+      // loading screen. That's what makes a slow/rate-limited image
+      // structurally unable to look like a "timeout" to the reader: there's
+      // no wait here for it to blow through.
       setGenStep(2)
-      setGenDetail(`Sending ${story.scenes.length} scenes off to be illustrated…`)
+      setGenDetail('Sending your scenes off to be illustrated…')
 
-      for (let i = 0; i < story.scenes.length; i++) {
-        const scene = story.scenes[i]
-        try {
-          await fetch('/api/submit-image-job', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              imagePrompt: scene.imagePrompt,
-              style,
-              storyId: id,
-              sceneIndex: i,
-              characters: charPayload
-            })
-          })
-        } catch (err) {
-          console.error(`Scene ${i} submission failed:`, err)
-        }
-        if (i < story.scenes.length - 1) await new Promise(r => setTimeout(r, 800))
-      }
-
-      // Step 3: Poll until every scene has an image (or errored out), with a
-      // sane ceiling so a stuck job can't strand the user on this screen forever.
-      const POLL_INTERVAL_MS = 3000
-      // Scale with scene count — a fixed ceiling made sense for 5-8 scenes,
-      // but longer stories need proportionally more time since scenes are
-      // competing for the same generation capacity. 40s/scene + 90s floor,
-      // capped at 10 minutes so a genuinely stuck job doesn't strand the user.
-      const MAX_WAIT_MS = Math.min(Math.max(story.scenes.length * 40_000, 90_000), 10 * 60 * 1000)
-      const startedAt = Date.now()
-      let sceneStatuses = story.scenes.map(() => null)
-
-      while (Date.now() - startedAt < MAX_WAIT_MS) {
-        try {
-          const statusRes = await fetch(`/api/image-status?storyId=${id}&sceneCount=${story.scenes.length}`)
-          if (statusRes.ok) {
-            const { scenes: statuses } = await statusRes.json()
-            sceneStatuses = statuses
-          }
-        } catch (err) {
-          console.error('Status poll failed:', err)
-        }
-
-        const settled = sceneStatuses.filter(s => s?.status === 'done' || s?.status === 'error').length
-        setGenDetail(`Painting your story… ${settled} of ${story.scenes.length} scenes ready 🎨`)
-
-        if (settled === story.scenes.length) break
-        await new Promise(r => setTimeout(r, POLL_INTERVAL_MS))
-      }
-
-      // Merge whatever finished into the story. Scenes that errored or never
-      // finished in time are simply left without an imageUrl — StoryPlayer
-      // already shows a friendly placeholder for those.
+      const charPayload = chosenChars.map(c => ({ name: c.name, photoBase64: c.photoBase64 || null, photoMime: c.photoMime || 'image/jpeg', description: c.description || null }))
       story.scenes.forEach((scene, i) => {
-        if (sceneStatuses[i]?.status === 'done') scene.imageUrl = sceneStatuses[i].imageUrl
+        fetch('/api/submit-image-job', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            imagePrompt: scene.imagePrompt,
+            style,
+            storyId: id,
+            sceneIndex: i,
+            characters: charPayload
+          })
+        }).catch((err) => console.error(`Scene ${i} submission failed:`, err))
       })
-
-      setGenStep(3)
-      setGenDetail('Wrapping up your magical story… almost there! ✨')
-
 
       const fullStory = {
         id, title: story.title, tagline: story.tagline,

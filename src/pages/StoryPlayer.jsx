@@ -3,15 +3,6 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useStore } from '../lib/store'
 import { buildSfxTimeline, stopAmbientSfx } from '../lib/sfx'
 
-const STYLE_PROMPTS = {
-  'Watercolour': "soft watercolour children's book illustration, painterly, gentle colours,",
-  'Pixar-like': 'Pixar 3D animation style, warm cinematic lighting, expressive cute characters, highly detailed,',
-  'Storybook': "classic storybook illustration, detailed, warm, hand-painted, fairy tale style,",
-  'Comic book': 'bold comic book illustration, clean linework, bright vivid colours, dynamic composition,',
-  'Anime': 'Studio Ghibli anime style, detailed painterly backgrounds, soft lighting, expressive characters,',
-  'Claymation': 'claymation stop-motion style, tactile textures, warm whimsical, colourful,'
-}
-
 export default function StoryPlayer() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -48,29 +39,44 @@ export default function StoryPlayer() {
   const compact = landscape && viewportH < 560
   const [speaking, setSpeaking] = useState(false)
   const [loadingAudio, setLoadingAudio] = useState(false)
-  const [generatingImages, setGeneratingImages] = useState(false)
-  const [genDetail, setGenDetail] = useState('')
-  const [imageProgress, setImageProgress] = useState(0)
+  // True when the reader has asked to advance (manually or via auto-advance
+  // after narration) but the next scene's image isn't ready yet. We hold at
+  // the current scene rather than showing any kind of placeholder — the
+  // reader never sees an unfinished page, just a brief pause on the page
+  // they're already looking at.
+  const [waitingForNext, setWaitingForNext] = useState(false)
   const audioRef = useRef(null)
   const sfxCacheRef = useRef({})
   const autoAdvanceRef = useRef(null)
-  const imageGenRef = useRef(false)
+  // Remembers whether the pending advance (blocked by waitingForNext) should
+  // also auto-play narration once it goes through — i.e. whether this was a
+  // continuous-playthrough advance or a plain manual "next" click.
+  const pendingContinueRef = useRef(false)
+  // Set right before a scene-index change when that change should
+  // auto-play narration once rendered (continuous audiobook-style mode).
+  const autoPlayNextRef = useRef(false)
 
   // Load story on mount
   useEffect(() => {
     const s = getStory(id)
     setStory(s)
-    if (s?.imagesGenerating) {
-      startImageGeneration(s)
-    }
   }, [id])
 
-  // Backfill poller: Create.jsx's wait for images has a ceiling, so a slow
-  // scene can finish generating (webhook completes, S3/Redis get the result)
-  // *after* the user has already navigated here with that scene blank. This
-  // quietly checks whether any missing scenes have actually completed since,
-  // and patches them into the story if so — without needing a manual refresh.
+  // Backfill poller: images generate asynchronously in the background and
+  // are never waited on during creation, so this is the only thing that
+  // patches finished images into the story as they complete. It also
+  // retries scenes that come back rate-limited — OpenAI allows only 5/min
+  // image requests with input images (reference photos), confirmed via
+  // repeated testing, so some scenes predictably land here at least once.
+  // Retrying from here (client-driven, safely bounded per attempt) rather
+  // than from inside a webhook avoids ever needing a function invocation to
+  // sleep through a long backoff, which risks Vercel's duration limits.
   const backfillRef = useRef(false)
+  const retryCountsRef = useRef({})
+  const retryLastAttemptRef = useRef({})
+  const MAX_RETRIES_PER_SCENE = 5
+  const RETRY_COOLDOWN_MS = 20000
+
   useEffect(() => {
     if (!story?.scenes?.length) return
     const missing = story.scenes.some((s) => !s.imageUrl && !s.imageData)
@@ -79,8 +85,40 @@ export default function StoryPlayer() {
 
     let cancelled = false
     const BACKFILL_INTERVAL_MS = 8000
-    const BACKFILL_MAX_MS = 10 * 60 * 1000
+    // Generous ceiling — the reader may be actively reading through a long
+    // story for many minutes, so this isn't a "loading screen" timeout the
+    // way it once was. It just stops polling eventually so a permanently
+    // broken scene (e.g. genuinely exhausted retries) doesn't poll forever.
+    const BACKFILL_MAX_MS = 20 * 60 * 1000
     const startedAt = Date.now()
+
+    const retryRateLimitedScene = async (sceneIndex) => {
+      const attempts = retryCountsRef.current[sceneIndex] || 0
+      const lastAttempt = retryLastAttemptRef.current[sceneIndex] || 0
+      if (attempts >= MAX_RETRIES_PER_SCENE) return
+      if (Date.now() - lastAttempt < RETRY_COOLDOWN_MS) return
+
+      retryCountsRef.current[sceneIndex] = attempts + 1
+      retryLastAttemptRef.current[sceneIndex] = Date.now()
+
+      const sceneData = story.scenes[sceneIndex]
+      const charPayload = (story.characters || []).map((c) => ({
+        name: c.name, photoBase64: c.photoBase64 || null,
+        photoMime: c.photoMime || 'image/jpeg', description: c.description || null
+      }))
+      try {
+        await fetch('/api/submit-image-job', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            imagePrompt: sceneData.imagePrompt, style: story.style,
+            storyId: id, sceneIndex, characters: charPayload
+          })
+        })
+      } catch (err) {
+        console.error(`Retry submission for scene ${sceneIndex} failed:`, err)
+      }
+    }
 
     const poll = async () => {
       if (cancelled) return
@@ -101,6 +139,19 @@ export default function StoryPlayer() {
             setStory(updatedStory)
             saveStory(updatedStory)
           }
+
+          // Kick off retries for any rate-limited scenes, independent of the
+          // "are we done" check below. Staggered ~4s apart across scenes in
+          // this same tick — without this, several scenes rate-limited
+          // together would retry all at once and likely re-trigger the same
+          // limit we're trying to recover from.
+          const toRetry = statuses
+            .map((st, i) => ({ st, i }))
+            .filter(({ st, i }) => st?.status === 'error' && st?.errorCode === 'rate_limit_exceeded' && !updatedScenes[i].imageUrl)
+          toRetry.forEach(({ i }, orderIndex) => {
+            setTimeout(() => retryRateLimitedScene(i), orderIndex * 4000)
+          })
+
           const stillMissing = updatedScenes.some((sc) => !sc.imageUrl && !sc.imageData)
           if (!stillMissing) return // done — stop polling
         }
@@ -115,131 +166,6 @@ export default function StoryPlayer() {
 
     return () => { cancelled = true }
   }, [story?.id])
-
-  const startImageGeneration = async (s) => {
-    if (imageGenRef.current) return
-    imageGenRef.current = true
-    setGeneratingImages(true)
-
-    const scenes = [...s.scenes]
-    const total = scenes.length
-    const imageApiUrl = import.meta.env.VITE_IMAGE_API_URL
-
-    // Step 1: Create canonical portrait from character photo (identity anchor)
-    let canonicalPortrait = null
-    let characterDescription = s.charDesc || null
-    const refPhoto = s.characters?.find(c => c.photoBase64)?.photoBase64 || null
-
-    if (refPhoto) {
-      setGenDetail('Analysing character and creating portrait…')
-      try {
-        // Compress photo to max 512px before sending to avoid 413 errors
-        const compressedPhoto = await new Promise((resolve) => {
-          const img = new Image()
-          img.onload = () => {
-            const canvas = document.createElement('canvas')
-            const maxSize = 512
-            const ratio = Math.min(maxSize / img.width, maxSize / img.height, 1)
-            canvas.width = Math.round(img.width * ratio)
-            canvas.height = Math.round(img.height * ratio)
-            const ctx = canvas.getContext('2d')
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-            resolve(canvas.toDataURL('image/jpeg', 0.85).split(',')[1])
-          }
-          img.onerror = () => resolve(refPhoto)
-          img.src = `data:image/jpeg;base64,${refPhoto}`
-        })
-
-        const portraitRes = await fetch(`${imageApiUrl}/generate-image`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'create-portrait',
-            photoBase64: compressedPhoto,
-            style: s.style
-          })
-        })
-        if (portraitRes.ok) {
-          const data = await portraitRes.json()
-          if (data.characterDescription) {
-            characterDescription = data.characterDescription
-            console.log('Character description extracted:', characterDescription)
-          }
-
-          if (data.b64) canonicalPortrait = data.b64
-          console.log('Canonical portrait created successfully')
-        } else {
-          console.error('Portrait creation failed:', await portraitRes.text())
-        }
-      } catch (err) {
-        console.error('Portrait creation error:', err.message)
-      }
-    }
-
-    // Step 2: Generate each scene using canonical portrait as identity anchor
-    for (let i = 0; i < total; i++) {
-      setImageProgress(i)
-      try {
-        // Call Bedrock via server API (AWS credentials stay server-side)
-        const stylePrefix = {
-          'Watercolour': "soft watercolour children's book illustration, painterly,",
-          'Pixar-like': 'Pixar 3D animation style, warm cinematic lighting, expressive,',
-          'Storybook': "classic storybook illustration, hand-painted, warm,",
-          'Comic book': 'bold comic book illustration, clean linework, vivid colours,',
-          'Anime': 'Studio Ghibli anime style, detailed painterly backgrounds,',
-          'Claymation': 'claymation stop-motion style, tactile textures, whimsical,'
-        }
-        const charDesc = s.characters?.map(c => {
-          const parts = [c.name]
-          if (c.age) parts.push(`age ${c.age}`)
-          if (c.description) parts.push(c.description)
-          return parts.join(', ')
-        }).join(' | ') || ''
-
-        // Two-step identity-locked generation
-        let b64 = null
-        try {
-          const imgRes = await fetch(`${imageApiUrl}/generate-image`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: canonicalPortrait ? 'generate-scene' : 'fallback',
-              portraitBase64: canonicalPortrait,
-              characterDescription,
-              imagePrompt: scenes[i].imagePrompt || 'magical storybook scene',
-              style: s.style
-            })
-          })
-          if (imgRes.ok) {
-            const data = await imgRes.json()
-            b64 = data.b64
-          } else {
-            console.error(`Scene ${i+1} failed:`, imgRes.status, await imgRes.text())
-          }
-        } catch (err) {
-          console.error(`Scene ${i+1} error:`, err.message)
-        }
-
-        if (b64) {
-          scenes[i] = { ...scenes[i], imageData: b64, imageType: 'image/jpeg' }
-          setStory(prev => ({
-            ...prev,
-            scenes: prev.scenes.map((sc, idx) => idx === i ? { ...sc, imageData: b64, imageType: 'image/jpeg' } : sc)
-          }))
-          try {
-            localStorage.setItem(`sd_img_${id}_${i}`, JSON.stringify({ imageData: b64, imageType: 'image/jpeg' }))
-          } catch {}
-        }
-      } catch (err) {
-        console.error(`Scene ${i+1} error:`, err)
-      }
-    }
-
-    setImageProgress(total)
-    setGeneratingImages(false)
-    const updated = { ...s, scenes, imagesGenerating: false }
-    saveStory(updated)
-  }
 
   // Generate and play sfx via ElevenLabs, with in-memory cache
   const playSfx = useCallback(async (sound) => {
@@ -275,15 +201,46 @@ export default function StoryPlayer() {
   const scenes = story?.scenes || []
   const current = scenes[scene]
 
-  const goNext = useCallback(() => {
+  // continueReading=true means this advance came from narration finishing,
+  // and should auto-play the new scene's narration too once it lands
+  // (continuous audiobook-style playthrough). Manual next-button/arrow-key
+  // presses call this with no argument, so they just move the page.
+  const goNext = useCallback((continueReading = false) => {
+    const nextIndex = scene + 1
+    if (nextIndex >= scenes.length) { stopAudio(); return }
+    const nextReady = !!(scenes[nextIndex]?.imageUrl || scenes[nextIndex]?.imageData)
     stopAudio()
-    if (scene < scenes.length - 1) setScene(s => s + 1)
-  }, [scene, scenes.length, stopAudio])
+    if (nextReady) {
+      if (continueReading) autoPlayNextRef.current = true
+      setScene(nextIndex)
+    } else {
+      // Hold at the current, already-loaded scene rather than advancing to
+      // one without an image. The waiting indicator (spinner on the next
+      // arrow) is the only visible sign anything's happening.
+      pendingContinueRef.current = continueReading
+      setWaitingForNext(true)
+    }
+  }, [scene, scenes, stopAudio])
 
   const goPrev = useCallback(() => {
     stopAudio()
+    setWaitingForNext(false)
     setScene(s => Math.max(0, s - 1))
   }, [stopAudio])
+
+  // Once the scene we were waiting on actually becomes ready (via the
+  // backfill poller updating `story`), complete the advance we held earlier.
+  useEffect(() => {
+    if (!waitingForNext) return
+    const nextIndex = scene + 1
+    const nextReady = !!(scenes[nextIndex]?.imageUrl || scenes[nextIndex]?.imageData)
+    if (nextReady) {
+      setWaitingForNext(false)
+      if (pendingContinueRef.current) autoPlayNextRef.current = true
+      pendingContinueRef.current = false
+      setScene(nextIndex)
+    }
+  }, [story, waitingForNext, scene, scenes])
 
   const playNarration = useCallback(async () => {
     if (speaking || loadingAudio || !current?.narration) return
@@ -319,7 +276,7 @@ export default function StoryPlayer() {
           audio.onended = () => {
             sfxTimers.forEach(t => clearTimeout(t))
             setSpeaking(false)
-            autoAdvanceRef.current = setTimeout(goNext, 1500)
+            autoAdvanceRef.current = setTimeout(() => goNext(true), 1500)
           }
           audio.onerror = () => {
             sfxTimers.forEach(t => clearTimeout(t))
@@ -339,7 +296,6 @@ export default function StoryPlayer() {
 
       // Build SFX timeline from scene cues
       const sfxTimeline = buildSfxTimeline(current.narration, current.sfxCues)
-      let sfxIdx = 0
 
       // Time-based SFX — fire sounds at estimated word times
       // Average speaking rate ~2.5 words/second at rate 0.88
@@ -354,7 +310,7 @@ export default function StoryPlayer() {
       u.onend = () => {
         sfxTimers.forEach(t => clearTimeout(t))
         setSpeaking(false)
-        autoAdvanceRef.current = setTimeout(goNext, 1500)
+        autoAdvanceRef.current = setTimeout(() => goNext(true), 1500)
       }
       u.onerror = () => {
         sfxTimers.forEach(t => clearTimeout(t))
@@ -364,6 +320,20 @@ export default function StoryPlayer() {
       window.speechSynthesis.speak(u)
     }
   }, [current, speaking, loadingAudio, goNext])
+
+  // Keep a ref to the latest playNarration so the auto-play effect below
+  // never calls a stale closure from before the scene index changed.
+  const playNarrationRef = useRef(() => {})
+  useEffect(() => { playNarrationRef.current = playNarration }, [playNarration])
+
+  // After a continuous-playthrough advance lands (scene index actually
+  // changes), automatically start reading the new page aloud.
+  useEffect(() => {
+    if (autoPlayNextRef.current) {
+      autoPlayNextRef.current = false
+      playNarrationRef.current()
+    }
+  }, [scene])
 
   useEffect(() => {
     const handler = (e) => {
@@ -404,8 +374,23 @@ export default function StoryPlayer() {
     </div>
   )
 
+  // Never show a bare "no image yet" scene, including the very first one —
+  // hold on a full-page loading state until scene 0's illustration exists.
+  const scene0Ready = !!(scenes[0]?.imageUrl || scenes[0]?.imageData)
+  if (!scene0Ready) {
+    return (
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 18, padding: 40, background: '#0d0b1a', minHeight: '100vh' }}>
+        <div style={{ width: 40, height: 40, borderRadius: '50%', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: '#7F77DD', animation: 'spin 1s linear infinite' }} />
+        <p style={{ fontSize: 16, fontWeight: 600, color: 'white', textAlign: 'center', margin: 0 }}>Preparing your storybook…</p>
+        <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', textAlign: 'center', maxWidth: 280, margin: 0 }}>{story.title}</p>
+        <button onClick={() => navigate('/')} style={{ marginTop: 8, color: '#534AB7', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13 }}>← Back home</button>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    )
+  }
+
   const progress = ((scene + 1) / scenes.length) * 100
-  const imagesReady = imageProgress
+  const readyCount = scenes.filter((s) => s.imageUrl || s.imageData).length
 
   // Compact mode collapses onto a single overlay control bar (over the image)
   // instead of separate dots/controls/caption rows underneath the panel.
@@ -415,6 +400,8 @@ export default function StoryPlayer() {
   // nothing but the panel below the header/progress bar, there's nothing left
   // for a gap to appear in — the panel simply fills whatever space exists.
   const useOverlayControls = compact || projector
+  const nextIsLastAndUnreachable = scene === scenes.length - 1
+  const nextDisabled = nextIsLastAndUnreachable || waitingForNext
 
   return (
     <div style={{
@@ -435,7 +422,7 @@ export default function StoryPlayer() {
           {!compact && (
             <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', margin: 0 }}>
               {story.genre} · {story.style}
-              {generatingImages && ` · 🎨 Illustrating ${imagesReady}/${scenes.length}…`}
+              {readyCount < scenes.length && ` · ${readyCount}/${scenes.length} illustrated`}
             </p>
           )}
         </div>
@@ -506,19 +493,11 @@ export default function StoryPlayer() {
                   style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center 30%', animation: 'fadeIn 0.6s ease', display: 'block' }}
                 />
               ) : (
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: 'rgba(255,255,255,0.25)', gap: 8 }}>
-                  {generatingImages && scene >= imagesReady ? (
-                    <>
-                      <div style={{ width: 32, height: 32, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.1)', borderTopColor: '#7F77DD', animation: 'spin 1s linear infinite' }} />
-                      <p style={{ fontSize: 12 }}>Illustrating…</p>
-                    </>
-                  ) : (
-                    <>
-                      <p style={{ fontSize: 32 }}>🎨</p>
-                      <p style={{ fontSize: 12 }}>Scene {scene + 1}</p>
-                    </>
-                  )}
-                </div>
+                // Should be effectively unreachable — gating in goNext/the
+                // auto-advance effect means we only ever move to a scene once
+                // its image exists. Kept minimal (no cheerful placeholder
+                // text/emoji) purely as a silent safety net.
+                <div style={{ position: 'absolute', inset: 0, background: '#1a1830' }} />
               )}
 
               {/* Overlay controls — used in compact/mobile-landscape and fullscreen so the
@@ -532,8 +511,8 @@ export default function StoryPlayer() {
                 }}>
                   <div style={{ display: 'flex', gap: 5 }}>
                     {scenes.map((sc, i) => (
-                      <div key={i} onClick={() => { stopAudio(); setScene(i) }} style={{
-                        height: 5, borderRadius: 3, cursor: 'pointer', transition: 'all 0.2s',
+                      <div key={i} onClick={() => { if (sc.imageUrl || sc.imageData) { stopAudio(); setWaitingForNext(false); setScene(i) } }} style={{
+                        height: 5, borderRadius: 3, cursor: (sc.imageData || sc.imageUrl) ? 'pointer' : 'default', transition: 'all 0.2s',
                         width: i === scene ? 16 : 5,
                         background: i === scene ? '#7F77DD' : (sc.imageData || sc.imageUrl) ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.2)'
                       }} />
@@ -557,7 +536,9 @@ export default function StoryPlayer() {
                       {loadingAudio ? '⏳' : speaking ? '⏸ Stop' : '▶ Read aloud'}
                     </button>
 
-                    <button onClick={goNext} disabled={scene === scenes.length - 1} aria-label="Next" style={{ width: compact ? 32 : 40, height: compact ? 32 : 40, borderRadius: '50%', background: 'rgba(255,255,255,0.12)', border: '0.5px solid rgba(255,255,255,0.2)', color: 'white', cursor: scene === scenes.length - 1 ? 'not-allowed' : 'pointer', fontSize: compact ? 16 : 18, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: scene === scenes.length - 1 ? 0.4 : 1 }}>›</button>
+                    <button onClick={() => goNext()} disabled={nextDisabled} aria-label="Next" style={{ width: compact ? 32 : 40, height: compact ? 32 : 40, borderRadius: '50%', background: 'rgba(255,255,255,0.12)', border: '0.5px solid rgba(255,255,255,0.2)', color: 'white', cursor: nextDisabled ? 'not-allowed' : 'pointer', fontSize: compact ? 16 : 18, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: nextIsLastAndUnreachable ? 0.4 : 1 }}>
+                      {waitingForNext ? <span style={{ display: 'inline-block', width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.25)', borderTopColor: 'white', animation: 'spin 0.8s linear infinite' }} /> : '›'}
+                    </button>
                   </div>
                 </div>
               )}
@@ -569,8 +550,8 @@ export default function StoryPlayer() {
             <>
               <div style={{ display: 'flex', gap: 6, justifyContent: 'center', padding: '12px 20px', flexShrink: 0 }}>
                 {scenes.map((sc, i) => (
-                  <div key={i} onClick={() => { stopAudio(); setScene(i) }} style={{
-                    height: 6, borderRadius: 3, cursor: 'pointer', transition: 'all 0.2s',
+                  <div key={i} onClick={() => { if (sc.imageUrl || sc.imageData) { stopAudio(); setWaitingForNext(false); setScene(i) } }} style={{
+                    height: 6, borderRadius: 3, cursor: (sc.imageData || sc.imageUrl) ? 'pointer' : 'default', transition: 'all 0.2s',
                     width: i === scene ? 20 : 6,
                     background: i === scene ? '#7F77DD' : (sc.imageData || sc.imageUrl) ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.15)'
                   }} />
@@ -595,11 +576,13 @@ export default function StoryPlayer() {
                   {loadingAudio ? '⏳ Loading…' : speaking ? '⏸ Stop' : '▶ Read aloud'}
                 </button>
 
-                <button onClick={goNext} disabled={scene === scenes.length - 1} aria-label="Next" style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.7)', cursor: scene === scenes.length - 1 ? 'not-allowed' : 'pointer', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: scene === scenes.length - 1 ? 0.4 : 1 }}>›</button>
+                <button onClick={() => goNext()} disabled={nextDisabled} aria-label="Next" style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.7)', cursor: nextDisabled ? 'not-allowed' : 'pointer', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: nextIsLastAndUnreachable ? 0.4 : 1 }}>
+                  {waitingForNext ? <span style={{ display: 'inline-block', width: 16, height: 16, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.2)', borderTopColor: 'rgba(255,255,255,0.8)', animation: 'spin 0.8s linear infinite' }} /> : '›'}
+                </button>
               </div>
 
               <p style={{ textAlign: 'center', fontSize: 11, color: 'rgba(255,255,255,0.3)', paddingBottom: 16, flexShrink: 0 }}>
-                {scene + 1} of {scenes.length} · Space to play · ← → to navigate
+                {waitingForNext ? 'Preparing the next page…' : `${scene + 1} of ${scenes.length} · Space to play · ← → to navigate`}
               </p>
             </>
           )}
