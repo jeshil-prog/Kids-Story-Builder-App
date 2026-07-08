@@ -30,6 +30,11 @@ function readRawBody(req) {
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
+  if (!process.env.OPENAI_WEBHOOK_SECRET) {
+    console.error('OPENAI_WEBHOOK_SECRET is not set in this deployment\'s environment — check Vercel Settings > Environment Variables, confirm it is scoped to Production, and redeploy.')
+    return res.status(500).json({ error: 'Webhook secret not configured on server' })
+  }
+
   const rawBody = await readRawBody(req)
 
   let event
