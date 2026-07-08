@@ -30,6 +30,17 @@ function readRawBody(req) {
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
+  // TEMPORARY DIAGNOSTIC — remove once the webhook is confirmed working.
+  // Logs only presence/shape, never the actual secret value.
+  const secretVal = process.env.OPENAI_WEBHOOK_SECRET
+  console.log('DEBUG webhook secret check:', {
+    isSet: !!secretVal,
+    length: secretVal ? secretVal.length : 0,
+    startsWithWhsec: secretVal ? secretVal.startsWith('whsec_') : false,
+    first6: secretVal ? secretVal.slice(0, 6) : null,
+    hasWhitespace: secretVal ? /\s/.test(secretVal) : false
+  })
+
   if (!process.env.OPENAI_WEBHOOK_SECRET) {
     console.error('OPENAI_WEBHOOK_SECRET is not set in this deployment\'s environment — check Vercel Settings > Environment Variables, confirm it is scoped to Production, and redeploy.')
     return res.status(500).json({ error: 'Webhook secret not configured on server' })
