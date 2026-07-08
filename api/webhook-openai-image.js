@@ -16,7 +16,10 @@ import OpenAI from 'openai'
 import { redisGet, redisSet } from './_lib/redis.js'
 import { uploadToS3 } from './_lib/s3.js'
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  webhookSecret: process.env.OPENAI_WEBHOOK_SECRET
+})
 
 function readRawBody(req) {
   return new Promise((resolve, reject) => {
@@ -50,9 +53,7 @@ export default async function handler(req, res) {
 
   let event
   try {
-    event = await openai.webhooks.unwrap(rawBody.toString('utf8'), req.headers, {
-      secret: process.env.OPENAI_WEBHOOK_SECRET
-    })
+    event = await openai.webhooks.unwrap(rawBody.toString('utf8'), req.headers)
   } catch (err) {
     console.error('Webhook signature verification failed:', err.message)
     return res.status(400).json({ error: 'Invalid signature' })
