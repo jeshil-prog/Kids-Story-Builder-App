@@ -65,6 +65,57 @@ export default function StoryPlayer() {
     }
   }, [id])
 
+  // Backfill poller: Create.jsx's wait for images has a ceiling, so a slow
+  // scene can finish generating (webhook completes, S3/Redis get the result)
+  // *after* the user has already navigated here with that scene blank. This
+  // quietly checks whether any missing scenes have actually completed since,
+  // and patches them into the story if so — without needing a manual refresh.
+  const backfillRef = useRef(false)
+  useEffect(() => {
+    if (!story?.scenes?.length) return
+    const missing = story.scenes.some((s) => !s.imageUrl && !s.imageData)
+    if (!missing || backfillRef.current) return
+    backfillRef.current = true
+
+    let cancelled = false
+    const BACKFILL_INTERVAL_MS = 8000
+    const BACKFILL_MAX_MS = 10 * 60 * 1000
+    const startedAt = Date.now()
+
+    const poll = async () => {
+      if (cancelled) return
+      try {
+        const res = await fetch(`/api/image-status?storyId=${id}&sceneCount=${story.scenes.length}`)
+        if (res.ok) {
+          const { scenes: statuses } = await res.json()
+          let changed = false
+          const updatedScenes = story.scenes.map((sc, i) => {
+            if (!sc.imageUrl && statuses[i]?.status === 'done') {
+              changed = true
+              return { ...sc, imageUrl: statuses[i].imageUrl }
+            }
+            return sc
+          })
+          if (changed) {
+            const updatedStory = { ...story, scenes: updatedScenes }
+            setStory(updatedStory)
+            saveStory(updatedStory)
+          }
+          const stillMissing = updatedScenes.some((sc) => !sc.imageUrl && !sc.imageData)
+          if (!stillMissing) return // done — stop polling
+        }
+      } catch (err) {
+        console.error('Backfill poll failed:', err)
+      }
+      if (!cancelled && Date.now() - startedAt < BACKFILL_MAX_MS) {
+        setTimeout(poll, BACKFILL_INTERVAL_MS)
+      }
+    }
+    poll()
+
+    return () => { cancelled = true }
+  }, [story?.id])
+
   const startImageGeneration = async (s) => {
     if (imageGenRef.current) return
     imageGenRef.current = true
