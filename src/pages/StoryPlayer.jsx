@@ -3,6 +3,52 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useStore } from '../lib/store'
 import { buildSfxTimeline, stopAmbientSfx } from '../lib/sfx'
 
+function FinishingTouchesScreen({ title, onBack }) {
+  const MESSAGES = [
+    { emoji: '🎨', text: 'Painting your first page…' },
+    { emoji: '🖌️', text: 'Adding the finishing touches…' },
+    { emoji: '✨', text: 'Almost ready to read…' },
+    { emoji: '📖', text: 'Turning to page one…' },
+  ]
+  const [idx, setIdx] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => setIdx(i => (i + 1) % MESSAGES.length), 2800)
+    return () => clearInterval(t)
+  }, [])
+  const msg = MESSAGES[idx]
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 0, padding: 32, background: 'var(--surface-0)', position: 'relative', overflow: 'hidden', minHeight: '100vh' }}>
+      <style>{`
+        @keyframes drift { 0%{transform:translateY(100vh) rotate(0deg);opacity:0} 10%{opacity:1} 90%{opacity:1} 100%{transform:translateY(-20px) rotate(720deg);opacity:0} }
+        @keyframes bounce { 0%,100%{transform:scale(1)} 50%{transform:scale(1.15)} }
+      `}</style>
+
+      {['⭐','🌟','✨','💫','🌙','⭐','✨','🌟'].map((s, i) => (
+        <div key={i} style={{
+          position: 'absolute',
+          left: `${10 + i * 12}%`,
+          fontSize: `${12 + (i % 3) * 6}px`,
+          animation: `drift ${4 + i * 0.7}s ease-in-out ${i * 0.4}s infinite`,
+          pointerEvents: 'none',
+          opacity: 0
+        }}>{s}</div>
+      ))}
+
+      <div style={{ fontSize: 72, marginBottom: 24, animation: 'bounce 1.5s ease-in-out infinite' }}>
+        {msg.emoji}
+      </div>
+      <p style={{ fontSize: 22, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8, textAlign: 'center' }}>
+        {msg.text}
+      </p>
+      <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 8, textAlign: 'center', maxWidth: 280 }}>
+        {title}
+      </p>
+      <button onClick={onBack} style={{ marginTop: 16, color: '#534AB7', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13 }}>← Back home</button>
+    </div>
+  )
+}
+
 export default function StoryPlayer() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -47,6 +93,17 @@ export default function StoryPlayer() {
   const [waitingForNext, setWaitingForNext] = useState(false)
   const audioRef = useRef(null)
   const sfxCacheRef = useRef({})
+  // SFX timers/elements need to be reachable from stopAudio() (called on
+  // navigation), not just from playNarration's own onended/onerror handlers
+  // — otherwise stopping narration early left scheduled/playing SFX running
+  // on their own with nothing to cancel them.
+  const sfxTimersRef = useRef([])
+  const sfxAudioElementsRef = useRef([])
+  // Incremented every time playback is stopped or restarted. An in-flight
+  // playNarration() fetch checks this before acting on its result, so a
+  // slow request that resolves after the user has already navigated away
+  // (or pressed play again) can't start audio on top of what's now playing.
+  const playTokenRef = useRef(0)
   const autoAdvanceRef = useRef(null)
   // Remembers whether the pending advance (blocked by waitingForNext) should
   // also auto-play narration once it goes through — i.e. whether this was a
@@ -184,6 +241,10 @@ export default function StoryPlayer() {
       }
       const audio = new Audio(`data:audio/mpeg;base64,${b64}`)
       audio.volume = 0.35
+      sfxAudioElementsRef.current.push(audio)
+      audio.onended = () => {
+        sfxAudioElementsRef.current = sfxAudioElementsRef.current.filter(a => a !== audio)
+      }
       audio.play().catch(() => {})
     } catch (err) {
       console.error('SFX error:', err)
@@ -191,9 +252,19 @@ export default function StoryPlayer() {
   }, [])
 
   const stopAudio = useCallback(() => {
+    // Invalidates any in-flight playNarration() request — see playTokenRef.
+    playTokenRef.current += 1
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null }
     if (window.speechSynthesis) window.speechSynthesis.cancel()
     clearTimeout(autoAdvanceRef.current)
+    // Cancel SFX not yet triggered for this narration...
+    sfxTimersRef.current.forEach(t => clearTimeout(t))
+    sfxTimersRef.current = []
+    // ...and stop any SFX that's already actively playing. This is the fix
+    // for SFX continuing to play after narration is paused/stopped — they
+    // previously had nothing linking them to the narration's stop action.
+    sfxAudioElementsRef.current.forEach(a => { try { a.pause() } catch {} })
+    sfxAudioElementsRef.current = []
     setSpeaking(false)
     setLoadingAudio(false)
   }, [])
@@ -244,6 +315,11 @@ export default function StoryPlayer() {
 
   const playNarration = useCallback(async () => {
     if (speaking || loadingAudio || !current?.narration) return
+    // Captured now, checked again after each await below. If stopAudio() ran
+    // in the meantime (navigation, manual stop, or a second play press),
+    // this won't match anymore and the stale result is discarded instead of
+    // starting audio on top of whatever's now playing.
+    const myToken = ++playTokenRef.current
     const openAiKey = import.meta.env.VITE_OPENAI_API_KEY
 
     if (openAiKey) {
@@ -254,8 +330,10 @@ export default function StoryPlayer() {
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${openAiKey}` },
           body: JSON.stringify({ model: 'gpt-4o-mini-tts', input: current.narration, voice: 'coral', instructions: 'Speak warmly and gently, like a parent reading a bedtime story. Use a calm, expressive, storytelling tone.', speed: 0.9 })
         })
+        if (myToken !== playTokenRef.current) return
         if (res.ok) {
           const blob = await res.blob()
+          if (myToken !== playTokenRef.current) return
           const url = URL.createObjectURL(blob)
           const audio = new Audio(url)
           audioRef.current = audio
@@ -265,29 +343,35 @@ export default function StoryPlayer() {
           // Fire SFX at timed intervals during OpenAI TTS playback
           const sfxTimeline = buildSfxTimeline(current.narration, current.sfxCues)
           const wordsPerSecond = 2.5 * 0.9 // OpenAI TTS speed 0.9
-          const sfxTimers = []
+          sfxTimersRef.current = []
           sfxTimeline.forEach(cue => {
             const delayMs = (cue.wordIndex / wordsPerSecond) * 1000
-            const timer = setTimeout(() => playSfx(cue.sound), delayMs)
-            sfxTimers.push(timer)
+            const timer = setTimeout(() => { if (myToken === playTokenRef.current) playSfx(cue.sound) }, delayMs)
+            sfxTimersRef.current.push(timer)
           })
 
           audio.play()
           audio.onended = () => {
-            sfxTimers.forEach(t => clearTimeout(t))
+            if (myToken !== playTokenRef.current) return
+            sfxTimersRef.current.forEach(t => clearTimeout(t))
+            sfxTimersRef.current = []
             setSpeaking(false)
             autoAdvanceRef.current = setTimeout(() => goNext(true), 1500)
           }
           audio.onerror = () => {
-            sfxTimers.forEach(t => clearTimeout(t))
+            if (myToken !== playTokenRef.current) return
+            sfxTimersRef.current.forEach(t => clearTimeout(t))
+            sfxTimersRef.current = []
             setSpeaking(false)
             setLoadingAudio(false)
           }
           return
         }
       } catch {}
-      setLoadingAudio(false)
+      if (myToken === playTokenRef.current) setLoadingAudio(false)
     }
+
+    if (myToken !== playTokenRef.current) return
 
     // Fallback to browser TTS with SFX word boundary triggers
     if (window.speechSynthesis) {
@@ -300,26 +384,30 @@ export default function StoryPlayer() {
       // Time-based SFX — fire sounds at estimated word times
       // Average speaking rate ~2.5 words/second at rate 0.88
       const wordsPerSecond = 2.5 * 0.88
-      const sfxTimers = []
+      sfxTimersRef.current = []
       sfxTimeline.forEach(cue => {
         const delayMs = (cue.wordIndex / wordsPerSecond) * 1000
-        const timer = setTimeout(() => playSfx(cue.sound), delayMs)
-        sfxTimers.push(timer)
+        const timer = setTimeout(() => { if (myToken === playTokenRef.current) playSfx(cue.sound) }, delayMs)
+        sfxTimersRef.current.push(timer)
       })
 
       u.onend = () => {
-        sfxTimers.forEach(t => clearTimeout(t))
+        if (myToken !== playTokenRef.current) return
+        sfxTimersRef.current.forEach(t => clearTimeout(t))
+        sfxTimersRef.current = []
         setSpeaking(false)
         autoAdvanceRef.current = setTimeout(() => goNext(true), 1500)
       }
       u.onerror = () => {
-        sfxTimers.forEach(t => clearTimeout(t))
+        if (myToken !== playTokenRef.current) return
+        sfxTimersRef.current.forEach(t => clearTimeout(t))
+        sfxTimersRef.current = []
         setSpeaking(false)
       }
       setSpeaking(true)
       window.speechSynthesis.speak(u)
     }
-  }, [current, speaking, loadingAudio, goNext])
+  }, [current, speaking, loadingAudio, goNext, playSfx])
 
   // Keep a ref to the latest playNarration so the auto-play effect below
   // never calls a stale closure from before the scene index changed.
@@ -376,17 +464,13 @@ export default function StoryPlayer() {
 
   // Never show a bare "no image yet" scene, including the very first one —
   // hold on a full-page loading state until scene 0's illustration exists.
+  // Deliberately styled to match Create.jsx's loading screen (same floating
+  // particles, bouncing emoji, rotating message) so this reads as one
+  // continuous "your story is coming together" experience rather than two
+  // different-looking loading screens back to back.
   const scene0Ready = !!(scenes[0]?.imageUrl || scenes[0]?.imageData)
   if (!scene0Ready) {
-    return (
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 18, padding: 40, background: '#0d0b1a', minHeight: '100vh' }}>
-        <div style={{ width: 40, height: 40, borderRadius: '50%', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: '#7F77DD', animation: 'spin 1s linear infinite' }} />
-        <p style={{ fontSize: 16, fontWeight: 600, color: 'white', textAlign: 'center', margin: 0 }}>Preparing your storybook…</p>
-        <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', textAlign: 'center', maxWidth: 280, margin: 0 }}>{story.title}</p>
-        <button onClick={() => navigate('/')} style={{ marginTop: 8, color: '#534AB7', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13 }}>← Back home</button>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      </div>
-    )
+    return <FinishingTouchesScreen title={story.title} onBack={() => navigate('/')} />
   }
 
   const progress = ((scene + 1) / scenes.length) * 100
