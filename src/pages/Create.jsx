@@ -71,13 +71,16 @@ export default function Create() {
       const id = uuidv4()
       const charPayload = chosenChars.map(c => ({ name: c.name, photoBase64: c.photoBase64 || null, photoMime: c.photoMime || 'image/jpeg', description: c.description || null }))
 
-      // Step 2: Generate all images one at a time before navigating
+      // Step 2: Submit all scene image jobs (async — each returns almost
+      // instantly, actual generation finishes later via OpenAI's webhook).
+      // Staggered slightly so we don't fire N simultaneous requests at OpenAI.
       setGenStep(2)
+      setGenDetail(`Sending ${story.scenes.length} scenes off to be illustrated…`)
+
       for (let i = 0; i < story.scenes.length; i++) {
         const scene = story.scenes[i]
-        setGenDetail(`Painting scene ${i + 1} of ${story.scenes.length}… 🎨`)
         try {
-          const imgRes = await fetch('/api/generate-image', {
+          await fetch('/api/submit-image-job', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -88,14 +91,43 @@ export default function Create() {
               characters: charPayload
             })
           })
-          if (imgRes.ok) {
-            const { imageUrl } = await imgRes.json()
-            scene.imageUrl = imageUrl
+        } catch (err) {
+          console.error(`Scene ${i} submission failed:`, err)
+        }
+        if (i < story.scenes.length - 1) await new Promise(r => setTimeout(r, 800))
+      }
+
+      // Step 3: Poll until every scene has an image (or errored out), with a
+      // sane ceiling so a stuck job can't strand the user on this screen forever.
+      const POLL_INTERVAL_MS = 3000
+      const MAX_WAIT_MS = 4 * 60 * 1000
+      const startedAt = Date.now()
+      let sceneStatuses = story.scenes.map(() => null)
+
+      while (Date.now() - startedAt < MAX_WAIT_MS) {
+        try {
+          const statusRes = await fetch(`/api/image-status?storyId=${id}&sceneCount=${story.scenes.length}`)
+          if (statusRes.ok) {
+            const { scenes: statuses } = await statusRes.json()
+            sceneStatuses = statuses
           }
         } catch (err) {
-          console.error(`Scene ${i} failed:`, err)
+          console.error('Status poll failed:', err)
         }
+
+        const settled = sceneStatuses.filter(s => s?.status === 'done' || s?.status === 'error').length
+        setGenDetail(`Painting your story… ${settled} of ${story.scenes.length} scenes ready 🎨`)
+
+        if (settled === story.scenes.length) break
+        await new Promise(r => setTimeout(r, POLL_INTERVAL_MS))
       }
+
+      // Merge whatever finished into the story. Scenes that errored or never
+      // finished in time are simply left without an imageUrl — StoryPlayer
+      // already shows a friendly placeholder for those.
+      story.scenes.forEach((scene, i) => {
+        if (sceneStatuses[i]?.status === 'done') scene.imageUrl = sceneStatuses[i].imageUrl
+      })
 
       setGenStep(3)
       setGenDetail('Wrapping up your magical story… almost there! ✨')
