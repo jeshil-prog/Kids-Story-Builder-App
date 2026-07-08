@@ -33,17 +33,6 @@ function readRawBody(req) {
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  // TEMPORARY DIAGNOSTIC — remove once the webhook is confirmed working.
-  // Logs only presence/shape, never the actual secret value.
-  const secretVal = process.env.OPENAI_WEBHOOK_SECRET
-  console.log('DEBUG webhook secret check:', {
-    isSet: !!secretVal,
-    length: secretVal ? secretVal.length : 0,
-    startsWithWhsec: secretVal ? secretVal.startsWith('whsec_') : false,
-    first6: secretVal ? secretVal.slice(0, 6) : null,
-    hasWhitespace: secretVal ? /\s/.test(secretVal) : false
-  })
-
   if (!process.env.OPENAI_WEBHOOK_SECRET) {
     console.error('OPENAI_WEBHOOK_SECRET is not set in this deployment\'s environment — check Vercel Settings > Environment Variables, confirm it is scoped to Production, and redeploy.')
     return res.status(500).json({ error: 'Webhook secret not configured on server' })
@@ -91,11 +80,20 @@ export default async function handler(req, res) {
 
   try {
     const response = await openai.responses.retrieve(responseId)
-    const imageData = (response.output || [])
-      .filter((o) => o.type === 'image_generation_call')
-      .map((o) => o.result)
+    const imageBlocks = (response.output || []).filter((o) => o.type === 'image_generation_call')
+    const imageData = imageBlocks.filter((o) => o.result).map((o) => o.result)
 
     if (!imageData.length) {
+      // We got a completed response, but no usable image came back — log
+      // enough of the output shape to tell us why (moderation block,
+      // partial/incomplete generation, unexpected field name, etc.) without
+      // needing another round of back-and-forth to diagnose it.
+      console.error('Completed response had no usable image result:', {
+        responseId,
+        outputTypes: (response.output || []).map((o) => o.type),
+        imageBlockCount: imageBlocks.length,
+        imageBlockStatuses: imageBlocks.map((o) => ({ status: o.status, revisedPrompt: o.revised_prompt, hasResult: !!o.result }))
+      })
       await redisSet(sceneKey, { status: 'error', error: 'No image in completed response' }, 3600)
       return res.status(200).json({ ok: true })
     }
