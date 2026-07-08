@@ -85,8 +85,30 @@ export default async function handler(req, res) {
   }
 
   if (event.type === 'response.failed' || event.type === 'response.incomplete') {
+    let detail = event.type
     try {
-      await redisSet(sceneKey, { status: 'error', error: event.type }, 3600)
+      // The webhook event itself has no explanation — retrieve the actual
+      // response to get the real reason (moderation block, content filter,
+      // token limit, etc.), and log it loudly. Previously this branch logged
+      // nothing at all, so a failed/incomplete job looked identical to a
+      // success in the access logs (both just "200 POST") — this is why
+      // repeated log checks kept turning up clean.
+      const failedResponse = await openai.responses.retrieve(responseId)
+      detail = failedResponse.error?.message
+        || failedResponse.incomplete_details?.reason
+        || event.type
+      console.error('Image job failed/incomplete:', {
+        responseId,
+        eventType: event.type,
+        status: failedResponse.status,
+        error: failedResponse.error,
+        incompleteDetails: failedResponse.incomplete_details
+      })
+    } catch (err) {
+      console.error('Image job failed/incomplete (could not retrieve details):', event.type, err.message)
+    }
+    try {
+      await redisSet(sceneKey, { status: 'error', error: detail }, 3600)
     } catch (err) {
       console.error('Failed to write error status to Redis:', err.message)
     }
