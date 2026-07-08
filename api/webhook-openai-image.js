@@ -57,7 +57,13 @@ export default async function handler(req, res) {
   const responseId = event.data?.id
   if (!responseId) return res.status(200).json({ ok: true, ignored: 'no response id' })
 
-  const jobMeta = await redisGet(`openai_job:${responseId}`)
+  let jobMeta
+  try {
+    jobMeta = await redisGet(`openai_job:${responseId}`)
+  } catch (err) {
+    console.error('Failed to look up job mapping in Redis:', err.message)
+    return res.status(200).json({ ok: true, error: 'redis lookup failed' })
+  }
   if (!jobMeta) {
     // Either an unrelated response, or the mapping expired. Nothing to do.
     return res.status(200).json({ ok: true, ignored: 'unknown job' })
@@ -66,15 +72,24 @@ export default async function handler(req, res) {
   const { storyId, sceneIndex } = jobMeta
   const sceneKey = `story:${storyId}:scene:${sceneIndex}`
 
-  // Idempotency guard: if a retried webhook delivery arrives after we've
-  // already completed this scene, don't regenerate/re-upload/re-bill.
-  const existing = await redisGet(sceneKey)
-  if (existing?.status === 'done') {
-    return res.status(200).json({ ok: true, alreadyDone: true })
+  try {
+    // Idempotency guard: if a retried webhook delivery arrives after we've
+    // already completed this scene, don't regenerate/re-upload/re-bill.
+    const existing = await redisGet(sceneKey)
+    if (existing?.status === 'done') {
+      return res.status(200).json({ ok: true, alreadyDone: true })
+    }
+  } catch (err) {
+    console.error('Failed to check existing scene status in Redis:', err.message)
+    // Not fatal — worst case we redo the write below, which is safe.
   }
 
   if (event.type === 'response.failed' || event.type === 'response.incomplete') {
-    await redisSet(sceneKey, { status: 'error', error: event.type }, 3600)
+    try {
+      await redisSet(sceneKey, { status: 'error', error: event.type }, 3600)
+    } catch (err) {
+      console.error('Failed to write error status to Redis:', err.message)
+    }
     return res.status(200).json({ ok: true })
   }
 
