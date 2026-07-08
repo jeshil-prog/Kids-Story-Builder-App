@@ -100,7 +100,11 @@ export default function Create() {
       // Step 3: Poll until every scene has an image (or errored out), with a
       // sane ceiling so a stuck job can't strand the user on this screen forever.
       const POLL_INTERVAL_MS = 3000
-      const MAX_WAIT_MS = 4 * 60 * 1000
+      // Scale with scene count — a fixed ceiling made sense for 5-8 scenes,
+      // but longer stories need proportionally more time since scenes are
+      // competing for the same generation capacity. 40s/scene + 90s floor,
+      // capped at 10 minutes so a genuinely stuck job doesn't strand the user.
+      const MAX_WAIT_MS = Math.min(Math.max(story.scenes.length * 40_000, 90_000), 10 * 60 * 1000)
       const startedAt = Date.now()
       let sceneStatuses = story.scenes.map(() => null)
 
