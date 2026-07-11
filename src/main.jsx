@@ -34,14 +34,6 @@ style.textContent = `
     }
   }
 
-  html, body {
-    /* A hair taller than the viewport on purpose — Safari only auto-collapses
-       its own address bar / tab strip in response to an actual scroll
-       gesture. A page that exactly matches the viewport height has nothing
-       to scroll, so Safari never gets the signal to hide its chrome. */
-    min-height: calc(100% + 1px);
-  }
-
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     background: var(--surface-0);

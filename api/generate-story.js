@@ -33,7 +33,7 @@ Key rules:
 - Include vivid specific details: colours, sounds, textures, emotions
 - Add dialogue with quotation marks to bring scenes alive
 - Build excitement and tension across scenes
-- Each scene is 2-3 sentences — every sentence should earn its place, no filler
+- Each scene is 2-3 sentences, 35-45 words total — short, punchy sentences, not long compound ones. Never chain multiple clauses together with commas/"and" to cram extra content into one sentence — if it needs a comma to add another action or detail, it should probably be its own short sentence instead, or cut entirely
 - End the story with a warm heart message about family, friendship or courage
 - Always end happily
 
@@ -56,7 +56,7 @@ Return this exact JSON shape:
     {
       "sceneNumber": 1,
       "chapter": "Short exciting scene title (e.g. 'The Discovery', 'Setting Sail', 'The Hidden Cave')",
-      "narration": "2-3 sentences telling this part of the story — tight and vivid, not padded. Use character names. Include specific details, emotion, and dialogue where it earns its place. Match the warm adventure tone of the example.",
+      "narration": "2-3 SHORT sentences, 35-45 words total — tight and vivid, not padded, and no long comma-chained sentences standing in for several. Use character names. Include specific details, emotion, and dialogue where it earns its place. Match the warm adventure tone of the example.",
       "imagePrompt": "Describe EXACTLY what the character is physically doing in this scene for a ${visualStyle} children's picture book illustration. Format: [CHARACTER ACTION] + [ENVIRONMENT]. Be very specific about the action. Examples: 'Jessie rows a small wooden boat across a sparkling blue ocean, leaning forward with effort, dolphins jumping alongside, tropical island visible in background, golden afternoon light' OR 'Jessie crouches in a dark cave holding a glowing torch, eyes wide with wonder, ancient treasure chests scattered around, gold coins spilling out, waterfall visible at cave entrance' OR 'Jessie sits cross-legged on a clifftop at sunset, holding a treasure map, pointing excitedly at something in the distance, jungle stretching below, pink and orange sky'. Always specify: what the character is doing with their body/hands, their facial expression, and the full environment around them.",
       "sfxCues": [
         {
