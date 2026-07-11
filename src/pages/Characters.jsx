@@ -301,7 +301,7 @@ export default function Characters() {
               background: 'var(--surface-card)', border: '0.5px solid var(--border)',
               borderRadius: 16, padding: '16px 18px', display: 'flex', alignItems: 'center', gap: 14
             }}>
-              <Avatar name={c.name} photo={c.photo} size={52} />
+              <Avatar name={c.name} photo={c.photoUrl || c.photo} size={52} />
               <div style={{ flex: 1 }}>
                 <p style={{ fontSize: 15, fontWeight: 600, marginBottom: 3 }}>{c.name}</p>
                 <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>

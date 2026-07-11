@@ -54,7 +54,7 @@ export default function Home() {
               onMouseEnter={e => e.currentTarget.style.borderColor = '#7F77DD'}
               onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
             >
-              <Avatar name={c.name} photo={c.photo} size={28} />
+              <Avatar name={c.name} photo={c.photoUrl || c.photo} size={28} />
               <span style={{ fontSize: 13, fontWeight: 500 }}>{c.name}</span>
             </div>
           ))}

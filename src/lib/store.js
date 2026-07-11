@@ -5,13 +5,20 @@ import { v4 as uuidv4 } from 'uuid'
 // photoUrl (the durable S3 URL) is deliberately KEPT — it's a tiny string
 // with no quota impact, and it's what makes character photos actually
 // survive a page reload. photoBase64 stays in-memory-only by design.
+//
+// `photo` (an inline base64 data-URL thumbnail) used to be truncated to
+// 2000 characters as a compromise to avoid blowing the quota — but a real
+// compressed thumbnail is almost always longer than that, so this was
+// slicing the base64 stream off mid-way, producing corrupted/undecodable
+// image data (a broken-image icon) rather than a lower-quality one. Now
+// that photoUrl exists as a reliable full source, `photo` is dropped
+// entirely rather than stored broken.
 const saveCharacters = (chars) => {
   try {
-    // Strip photo base64 before saving — keep only the small thumbnail data URL
     const slim = chars.map(c => ({
       ...c,
       photoBase64: undefined,  // don't store raw base64
-      photo: c.photo ? c.photo.slice(0, 2000) : null  // keep tiny thumbnail only
+      photo: null              // superseded by photoUrl — see comment above
     }))
     localStorage.setItem('sd_characters', JSON.stringify(slim))
   } catch (e) {

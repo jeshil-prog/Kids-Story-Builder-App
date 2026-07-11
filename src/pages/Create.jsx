@@ -242,7 +242,7 @@ export default function Create() {
                     minWidth: 80
                   }}
                 >
-                  <Avatar name={c.name} photo={c.photo} size={44} />
+                  <Avatar name={c.name} photo={c.photoUrl || c.photo} size={44} />
                   <span style={{ fontSize: 12, fontWeight: sel ? 600 : 400, color: sel ? '#3C3489' : 'var(--text-secondary)' }}>{c.name}</span>
                 </div>
               )

@@ -112,7 +112,6 @@ export default function StoryPlayer() {
   // slow request that resolves after the user has already navigated away
   // (or pressed play again) can't start audio on top of what's now playing.
   const playTokenRef = useRef(0)
-  const autoAdvanceRef = useRef(null)
   // Remembers whether the pending advance (blocked by waitingForNext) should
   // also auto-play narration once it goes through — i.e. whether this was a
   // continuous-playthrough advance or a plain manual "next" click.
@@ -264,7 +263,6 @@ export default function StoryPlayer() {
     playTokenRef.current += 1
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null }
     if (window.speechSynthesis) window.speechSynthesis.cancel()
-    clearTimeout(autoAdvanceRef.current)
     // Cancel SFX not yet triggered for this narration...
     sfxTimersRef.current.forEach(t => clearTimeout(t))
     sfxTimersRef.current = []
@@ -386,7 +384,10 @@ export default function StoryPlayer() {
             sfxTimersRef.current.forEach(t => clearTimeout(t))
             sfxTimersRef.current = []
             setSpeaking(false)
-            autoAdvanceRef.current = setTimeout(() => goNext(true), 1500)
+            // No setTimeout here — every async hop between this and the next
+            // audio.play() risks mobile Safari treating it as disconnected
+            // from the original tap and silently blocking it.
+            goNext(true)
           }
           audio.onerror = () => {
             if (myToken !== playTokenRef.current) return
@@ -426,7 +427,7 @@ export default function StoryPlayer() {
         sfxTimersRef.current.forEach(t => clearTimeout(t))
         sfxTimersRef.current = []
         setSpeaking(false)
-        autoAdvanceRef.current = setTimeout(() => goNext(true), 1500)
+        goNext(true)
       }
       u.onerror = () => {
         if (myToken !== playTokenRef.current) return
