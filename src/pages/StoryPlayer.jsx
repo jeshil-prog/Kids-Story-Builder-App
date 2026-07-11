@@ -168,7 +168,7 @@ export default function StoryPlayer() {
 
       const sceneData = story.scenes[sceneIndex]
       const charPayload = (story.characters || []).map((c) => ({
-        name: c.name, photoBase64: c.photoBase64 || null,
+        name: c.name, photoBase64: c.photoBase64 || null, photoUrl: c.photoUrl || null,
         photoMime: c.photoMime || 'image/jpeg', description: c.description || null
       }))
       try {

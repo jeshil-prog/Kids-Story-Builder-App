@@ -1,7 +1,10 @@
 import { create } from 'zustand'
 import { v4 as uuidv4 } from 'uuid'
 
-// Safe localStorage save — strips large base64 data to avoid quota errors
+// Safe localStorage save — strips large base64 data to avoid quota errors.
+// photoUrl (the durable S3 URL) is deliberately KEPT — it's a tiny string
+// with no quota impact, and it's what makes character photos actually
+// survive a page reload. photoBase64 stays in-memory-only by design.
 const saveCharacters = (chars) => {
   try {
     // Strip photo base64 before saving — keep only the small thumbnail data URL

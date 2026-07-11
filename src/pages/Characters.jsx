@@ -36,9 +36,23 @@ function CharacterForm({ initial, onSave, onCancel }) {
   const [photo, setPhoto] = useState(initial?.photo || null)
   const [photoBase64, setPhotoBase64] = useState(initial?.photoBase64 || null)
   const [photoMime, setPhotoMime] = useState(initial?.photoMime || 'image/jpeg')
+  // Durable S3 URL for the photo — this, not photoBase64, is what actually
+  // survives a page reload. photoBase64 is deliberately stripped before
+  // writing characters to localStorage (it's too large and would blow the
+  // quota), so it only ever exists in memory for the current session. That
+  // was silently losing character photos on reload — easy to miss on
+  // desktop where a tab often stays open the whole time, but iOS Safari
+  // evicts backgrounded tab memory far more readily, which is why this was
+  // actually visible as "characters don't save on mobile."
+  const [photoUrl, setPhotoUrl] = useState(initial?.photoUrl || null)
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [description, setDescription] = useState(initial?.description || '')
   const [analysing, setAnalysing] = useState(false)
   const fileRef = useRef()
+  // handleSave awaits this if a photo upload is still in flight, so the
+  // durable URL is always captured before the character is saved rather
+  // than racing it.
+  const photoUploadPromiseRef = useRef(null)
 
   const handlePhoto = async (e) => {
     const file = e.target.files[0]
@@ -53,6 +67,21 @@ function CharacterForm({ initial, onSave, onCancel }) {
       setPhoto(compressed)
       setPhotoBase64(base64)
       setPhotoMime('image/jpeg')
+      setPhotoUrl(null)
+
+      // Upload to S3 for durable storage — runs alongside the description
+      // analysis below, not blocking it.
+      setUploadingPhoto(true)
+      const uploadPromise = fetch('/api/upload-photo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base64, mimeType: 'image/jpeg' })
+      })
+        .then(res => res.ok ? res.json() : null)
+        .then(data => { if (data?.url) setPhotoUrl(data.url) })
+        .catch(err => console.error('Photo upload failed:', err))
+        .finally(() => setUploadingPhoto(false))
+      photoUploadPromiseRef.current = uploadPromise
 
       // Auto-analyse the photo — use name if available, otherwise analyse immediately
       const nameToUse = name || initial?.name || 'the character'
@@ -110,9 +139,14 @@ function CharacterForm({ initial, onSave, onCancel }) {
 
   const valid = name.trim().length > 0
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!valid) return
-    onSave({ name, age, personality, role, photo, photoBase64, photoMime, description })
+    // Make sure the S3 upload has finished (if one was in flight) so we
+    // always save the durable URL, not a race against it.
+    if (photoUploadPromiseRef.current) {
+      await photoUploadPromiseRef.current
+    }
+    onSave({ name, age, personality, role, photo, photoBase64, photoMime, photoUrl, description })
   }
 
   return (
@@ -212,7 +246,7 @@ function CharacterForm({ initial, onSave, onCancel }) {
       <div style={{ display: 'flex', gap: 10 }}>
         <Button onClick={onCancel} variant="secondary" style={{ flex: 1 }}>Cancel</Button>
         <Button onClick={handleSave} disabled={!valid} style={{ flex: 1 }}>
-          Save character
+          {uploadingPhoto ? 'Saving…' : 'Save character'}
         </Button>
       </div>
     </div>

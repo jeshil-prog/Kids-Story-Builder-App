@@ -1,5 +1,15 @@
-// Upload a character photo to fal.ai storage and return a public URL
+// Uploads a character reference photo to S3 and returns a durable public URL.
+// Character photos were previously kept only in-memory (Zustand state) and
+// deliberately stripped before writing to localStorage (to avoid quota
+// errors) — meaning they never actually persisted across a page reload on
+// ANY platform. This was easy to miss on desktop, where a tab often stays
+// open for the whole session, but iOS Safari evicts backgrounded tab memory
+// far more aggressively, which is why this showed up as "characters don't
+// save on mobile" even though the underlying gap existed everywhere.
 export const config = { maxDuration: 30 }
+
+import { uploadToS3 } from './_lib/s3.js'
+import { randomUUID } from 'crypto'
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -8,57 +18,12 @@ export default async function handler(req, res) {
   if (!base64) return res.status(400).json({ error: 'No photo provided' })
 
   try {
-    // Convert base64 to binary
-    const binary = Buffer.from(base64, 'base64')
     const ext = mimeType?.includes('png') ? 'png' : 'jpg'
-
-    // Upload to fal.ai storage
-    const uploadRes = await fetch('https://rest.alpha.fal.ai/storage/upload/initiate', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Key ${process.env.FAL_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        content_type: mimeType || 'image/jpeg',
-        file_name: `character.${ext}`
-      })
-    })
-
-    if (!uploadRes.ok) {
-      // Try direct upload approach
-      const formData = new FormData()
-      const blob = new Blob([binary], { type: mimeType || 'image/jpeg' })
-      formData.append('file', blob, `character.${ext}`)
-
-      const directRes = await fetch('https://rest.alpha.fal.ai/storage/upload', {
-        method: 'POST',
-        headers: { 'Authorization': `Key ${process.env.FAL_KEY}` },
-        body: formData
-      })
-
-      if (!directRes.ok) {
-        const err = await directRes.text()
-        console.error('fal upload error:', err)
-        return res.status(500).json({ error: 'Photo upload failed' })
-      }
-
-      const data = await directRes.json()
-      return res.status(200).json({ url: data.url || data.access_url })
-    }
-
-    const { upload_url, file_url } = await uploadRes.json()
-
-    // Upload the actual file
-    await fetch(upload_url, {
-      method: 'PUT',
-      headers: { 'Content-Type': mimeType || 'image/jpeg' },
-      body: binary
-    })
-
-    res.status(200).json({ url: file_url })
+    const key = `characters/${randomUUID()}.${ext}`
+    const url = await uploadToS3(base64, mimeType || 'image/jpeg', key)
+    res.status(200).json({ url })
   } catch (err) {
-    console.error('Upload error:', err)
+    console.error('Photo upload error:', err)
     res.status(500).json({ error: err.message })
   }
 }

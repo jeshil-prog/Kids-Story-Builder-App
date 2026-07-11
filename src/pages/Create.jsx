@@ -89,7 +89,7 @@ export default function Create() {
       setGenStep(2)
       setGenDetail('Sending your scenes off to be illustrated…')
 
-      const charPayload = chosenChars.map(c => ({ name: c.name, photoBase64: c.photoBase64 || null, photoMime: c.photoMime || 'image/jpeg', description: c.description || null }))
+      const charPayload = chosenChars.map(c => ({ name: c.name, photoBase64: c.photoBase64 || null, photoUrl: c.photoUrl || null, photoMime: c.photoMime || 'image/jpeg', description: c.description || null }))
       story.scenes.forEach((scene, i) => {
         fetch('/api/submit-image-job', {
           method: 'POST',

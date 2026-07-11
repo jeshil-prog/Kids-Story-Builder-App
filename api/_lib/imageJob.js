@@ -18,7 +18,12 @@ const STYLE_PROMPTS = {
 export async function submitImageJob({ imagePrompt, style, characters, storyId, sceneIndex }) {
   const styleDesc = STYLE_PROMPTS[style] || "children's book illustration, warm and magical"
   const namedChars = (characters || []).filter((c) => c.name)
-  const charsWithPhotos = namedChars.filter((c) => c.photoBase64)
+  // photoBase64 (in-memory, current session only) is preferred when present
+  // since it avoids an extra round-trip; photoUrl (durable S3 URL, survives
+  // reloads) is the fallback. OpenAI's Responses API officially supports
+  // passing a real HTTPS URL directly for input_image, not just a base64
+  // data URL, so no server-side fetch/re-encode is needed for the fallback.
+  const charsWithPhotos = namedChars.filter((c) => c.photoBase64 || c.photoUrl)
   const charNames = namedChars.map((c) => c.name).join(', ')
   const charDescriptions = namedChars
     .filter((c) => c.description)
@@ -37,8 +42,12 @@ STYLE RULES: Wide cinematic composition. Rich detailed environment. Characters i
 
   const content = [{ type: 'input_text', text: fullPrompt }]
   for (const char of charsWithPhotos) {
-    const mediaType = char.photoMime || 'image/jpeg'
-    content.push({ type: 'input_image', image_url: `data:${mediaType};base64,${char.photoBase64}` })
+    if (char.photoBase64) {
+      const mediaType = char.photoMime || 'image/jpeg'
+      content.push({ type: 'input_image', image_url: `data:${mediaType};base64,${char.photoBase64}` })
+    } else if (char.photoUrl) {
+      content.push({ type: 'input_image', image_url: char.photoUrl })
+    }
   }
 
   const response = await openai.responses.create({
