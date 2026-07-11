@@ -69,13 +69,30 @@ export default function StoryPlayer() {
       setLandscape(isLandscape())
       setViewportH(window.innerHeight)
     }
+    // Nudges Safari into collapsing its own address bar / tab strip — it only
+    // does this in response to an actual scroll gesture, which a nudge like
+    // this simulates. Retried a couple of times after rotation since Safari
+    // needs a moment to finish its own layout/animation before it'll respond;
+    // firing once immediately is usually too early to have any effect.
+    const nudgeChrome = () => { try { window.scrollTo(0, 1) } catch {} }
+    nudgeChrome()
+    const nudgeTimers = [setTimeout(nudgeChrome, 150), setTimeout(nudgeChrome, 500)]
+
+    const handleOrientationChange = () => {
+      update()
+      nudgeChrome()
+      setTimeout(nudgeChrome, 150)
+      setTimeout(nudgeChrome, 500)
+    }
+
     window.addEventListener('resize', update)
-    window.addEventListener('orientationchange', update)
+    window.addEventListener('orientationchange', handleOrientationChange)
     // iOS toggles the address bar on scroll, which changes innerHeight
     window.addEventListener('scroll', update, { passive: true })
     return () => {
+      nudgeTimers.forEach(clearTimeout)
       window.removeEventListener('resize', update)
-      window.removeEventListener('orientationchange', update)
+      window.removeEventListener('orientationchange', handleOrientationChange)
       window.removeEventListener('scroll', update)
     }
   }, [])
@@ -299,6 +316,28 @@ export default function StoryPlayer() {
     setScene(s => Math.max(0, s - 1))
   }, [stopAudio])
 
+  // Real browser Fullscreen API (hides the OS-level tab bar/URL bar) works
+  // on Android Chrome and desktop browsers, but iOS Safari does not support
+  // it for anything other than a <video> element — no JS workaround exists
+  // for that platform restriction. This is a best-effort enhancement on top
+  // of the CSS-only "projector" overlay, which is the most iOS can get.
+  // Must be called directly inside a click handler — browsers require
+  // fullscreen requests to originate from a genuine user gesture, so this
+  // can't live in a useEffect reacting to state changes.
+  const toggleProjector = useCallback(() => {
+    setProjector(p => {
+      const next = !p
+      try {
+        if (next && document.documentElement.requestFullscreen) {
+          document.documentElement.requestFullscreen().catch(() => {})
+        } else if (!next && document.fullscreenElement && document.exitFullscreen) {
+          document.exitFullscreen().catch(() => {})
+        }
+      } catch {}
+      return next
+    })
+  }, [])
+
   // Once the scene we were waiting on actually becomes ready (via the
   // backfill poller updating `story`), complete the advance we held earlier.
   useEffect(() => {
@@ -442,18 +481,6 @@ export default function StoryPlayer() {
     }
   }, [stopAudio])
 
-  if (!landscape) {
-    return (
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, padding: 40, background: '#0d0b1a' }}>
-        <div style={{ fontSize: 64 }}>📖</div>
-        <p style={{ fontSize: 20, fontWeight: 600, color: 'white', textAlign: 'center', margin: 0 }}>Rotate your device</p>
-        <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)', textAlign: 'center', maxWidth: 240, margin: 0, lineHeight: 1.6 }}>
-          Stories look best in landscape mode. Turn your phone sideways to begin reading!
-        </p>
-      </div>
-    )
-  }
-
   if (!story) return (
     <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16, padding: 40 }}>
       <p style={{ fontSize: 28 }}>📖</p>
@@ -467,10 +494,24 @@ export default function StoryPlayer() {
   // Deliberately styled to match Create.jsx's loading screen (same floating
   // particles, bouncing emoji, rotating message) so this reads as one
   // continuous "your story is coming together" experience rather than two
-  // different-looking loading screens back to back.
+  // different-looking loading screens back to back. Checked BEFORE the
+  // orientation prompt below — there's no reason to tell someone to rotate
+  // their device before there's anything ready for them to read yet.
   const scene0Ready = !!(scenes[0]?.imageUrl || scenes[0]?.imageData)
   if (!scene0Ready) {
     return <FinishingTouchesScreen title={story.title} onBack={() => navigate('/')} />
+  }
+
+  if (!landscape) {
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, padding: 40, background: '#0d0b1a' }}>
+        <div style={{ fontSize: 64 }}>📖</div>
+        <p style={{ fontSize: 20, fontWeight: 600, color: 'white', textAlign: 'center', margin: 0 }}>Rotate your device</p>
+        <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)', textAlign: 'center', maxWidth: 240, margin: 0, lineHeight: 1.6 }}>
+          Stories look best in landscape mode. Turn your phone sideways to begin reading!
+        </p>
+      </div>
+    )
   }
 
   const progress = ((scene + 1) / scenes.length) * 100
@@ -510,7 +551,7 @@ export default function StoryPlayer() {
             </p>
           )}
         </div>
-        <button onClick={() => { stopAudio(); setProjector(p => !p) }} style={{ background: 'rgba(255,255,255,0.1)', border: '0.5px solid rgba(255,255,255,0.15)', borderRadius: 8, color: 'rgba(255,255,255,0.7)', padding: compact ? '4px 9px' : '6px 12px', fontSize: compact ? 12 : 13, cursor: 'pointer', flexShrink: 0 }}>
+        <button onClick={() => { stopAudio(); toggleProjector() }} style={{ background: 'rgba(255,255,255,0.1)', border: '0.5px solid rgba(255,255,255,0.15)', borderRadius: 8, color: 'rgba(255,255,255,0.7)', padding: compact ? '4px 9px' : '6px 12px', fontSize: compact ? 12 : 13, cursor: 'pointer', flexShrink: 0 }}>
           {projector ? '⊠ Exit' : '⊡ Fullscreen'}
         </button>
       </div>

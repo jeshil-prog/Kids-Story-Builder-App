@@ -25,7 +25,7 @@ export default async function handler(req, res) {
 
 Your writing style matches this example exactly:
 
-"One sunny morning, brothers Beau and Darcy were exploring Grandpa's old shed when they discovered a dusty wooden chest. Inside was a faded treasure map covered in strange symbols and a big red X. At the bottom were the words: 'Treasure Island awaits the bravest adventurers.' Beau's eyes widened with excitement, and Darcy could hardly stand still."
+"One sunny morning, brothers Beau and Darcy discovered a dusty wooden chest in Grandpa's old shed. Inside was a faded treasure map with a big red X. 'Treasure Island awaits the bravest adventurers,' Beau read aloud, his eyes widening with excitement."
 
 Key rules:
 - Write in third person, past tense
@@ -33,7 +33,7 @@ Key rules:
 - Include vivid specific details: colours, sounds, textures, emotions
 - Add dialogue with quotation marks to bring scenes alive
 - Build excitement and tension across scenes
-- Each scene is 3-5 sentences — rich but not overwhelming
+- Each scene is 2-3 sentences — every sentence should earn its place, no filler
 - End the story with a warm heart message about family, friendship or courage
 - Always end happily
 
@@ -56,15 +56,15 @@ Return this exact JSON shape:
     {
       "sceneNumber": 1,
       "chapter": "Short exciting scene title (e.g. 'The Discovery', 'Setting Sail', 'The Hidden Cave')",
-      "narration": "3-5 sentences telling this part of the story. Use character names. Include vivid details, emotions, and dialogue. Match the warm adventure tone of the example.",
+      "narration": "2-3 sentences telling this part of the story — tight and vivid, not padded. Use character names. Include specific details, emotion, and dialogue where it earns its place. Match the warm adventure tone of the example.",
       "imagePrompt": "Describe EXACTLY what the character is physically doing in this scene for a ${visualStyle} children's picture book illustration. Format: [CHARACTER ACTION] + [ENVIRONMENT]. Be very specific about the action. Examples: 'Jessie rows a small wooden boat across a sparkling blue ocean, leaning forward with effort, dolphins jumping alongside, tropical island visible in background, golden afternoon light' OR 'Jessie crouches in a dark cave holding a glowing torch, eyes wide with wonder, ancient treasure chests scattered around, gold coins spilling out, waterfall visible at cave entrance' OR 'Jessie sits cross-legged on a clifftop at sunset, holding a treasure map, pointing excitedly at something in the distance, jungle stretching below, pink and orange sky'. Always specify: what the character is doing with their body/hands, their facial expression, and the full environment around them.",
       "sfxCues": [
         {
           "triggerPhrase": "exact short phrase from the narration text that should trigger the sound (3-5 words)",
-          "sound": "A short natural language description of the sound effect for a children's storybook — warm, gentle, and age-appropriate. Be specific and vivid. Examples: 'gentle ocean waves lapping on a sandy shore, peaceful and calming', 'magical sparkle chime, like fairy dust floating through the air', 'friendly dragon purring softly, warm and rumbling like a giant cat', 'cheerful birds singing in a sunny forest, joyful morning birdsong', 'soft rain pattering on leaves, cosy and gentle', 'whoosh of wind as someone flies through the air on a magic carpet', 'cosy crackling campfire with gentle popping embers', 'excited children cheering and clapping with delight'. Never use scary, violent, or distressing sounds."
+          "sound": "A short natural language description of the sound effect for a children's storybook — warm, gentle, and age-appropriate. Be specific, textured, and tied to exactly what's happening at that moment (not generic). Vary the sonic palette across the story — don't reuse the same sound twice. Examples: 'gentle ocean waves lapping on a sandy shore, a single seagull calling in the distance', 'magical sparkle chime rising in pitch, like fairy dust catching the light', 'friendly dragon purring low and warm, a rumble like distant thunder but cosy', 'floorboards creaking softly underfoot in an old wooden clubhouse', 'the papery rustle of a treasure map being unrolled', 'a single joyful gasp followed by delighted giggling'. Never use scary, violent, or distressing sounds."
         }
       ]
-      Note: include 1-3 sfxCues per scene, placed at natural sound moments in the narration. triggerPhrase must be an exact substring of the narration text. Make each sound description unique and specific to what is actually happening in that moment of the story.
+      Note: include roughly ONE sfxCue per sentence in the narration — nearly every sentence should have a sound tied to its key action or detail, not just 1-3 per whole scene. triggerPhrase must be an exact substring of the narration text. Every sound description must be distinct — reflect the specific action/detail of its sentence, not a repeated stock sound.
     }
   ]
 }`

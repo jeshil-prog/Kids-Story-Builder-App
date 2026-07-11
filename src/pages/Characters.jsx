@@ -149,7 +149,7 @@ function CharacterForm({ initial, onSave, onCancel }) {
 
       <Input label="Name *" value={name} onChange={handleNameChange} placeholder="e.g. Beau" />
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: 12 }}>
         <Input label="Age" value={age} onChange={setAge} placeholder="e.g. 7" type="number" />
         <Input label="Role" value={role} onChange={setRole} placeholder="e.g. Hero, Sidekick" />
       </div>

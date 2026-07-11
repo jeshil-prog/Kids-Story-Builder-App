@@ -1,0 +1,11 @@
+{
+  "name": "StoryDream",
+  "short_name": "StoryDream",
+  "description": "Personalised AI bedtime stories starring your family",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d0b1a",
+  "theme_color": "#0d0b1a",
+  "icons": []
+}

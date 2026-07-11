@@ -2,10 +2,22 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>StoryDream — Personalised AI Bedtime Stories</title>
     <meta name="description" content="Personalised AI bedtime stories starring your family" />
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌙</text></svg>" />
+
+    <!-- iOS "Add to Home Screen" support — when launched from the home
+         screen icon (not from within Safari), iOS runs the app with zero
+         browser chrome (no URL bar, no tab switcher). This is the only way
+         to get a genuinely fullscreen experience on iOS; there is no
+         JavaScript API that can hide Safari's chrome within a normal tab. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="StoryDream" />
+    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%230d0b1a'/><text x='50' y='68' font-size='60' text-anchor='middle'>🌙</text></svg>" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#0d0b1a" />
   </head>
   <body>
     <div id="root"></div>
