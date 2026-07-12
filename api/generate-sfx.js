@@ -15,8 +15,9 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         text: sound,
-        duration_seconds: 3,
-        prompt_influence: 0.4
+        duration_seconds: 2,
+        prompt_influence: 0.55,
+        output_format: 'mp3_44100_128'
       })
     })
 

@@ -101,11 +101,31 @@ export default function StoryPlayer() {
   const [waitingForNext, setWaitingForNext] = useState(false)
   const audioRef = useRef(null)
   const sfxCacheRef = useRef({})
-  // Playing SFX need to be reachable from stopAudio() (called on
-  // navigation), not just from playNarration's own onended/onerror handlers
-  // — otherwise stopping narration early left already-playing SFX running
-  // on their own with nothing to cancel them.
-  const sfxAudioElementsRef = useRef([])
+  // SFX now play through the Web Audio API instead of separate <audio>
+  // elements — narration (which already works correctly) is untouched.
+  // The reasoning: HTMLAudioElement's autoplay policy appears to check each
+  // .play() call individually for a connection to a trusted gesture, which
+  // is why sequential narration-to-narration chaining could be fixed (each
+  // call happens inside a trusted event) but *overlapping* SFX playing
+  // alongside already-playing narration still got blocked on mobile even
+  // after being tied to trusted timeupdate/onboundary events — starting a
+  // second, separate, concurrent media element is a stricter case. Web
+  // Audio API's restriction is different: the AudioContext itself needs
+  // unlocking once via a real gesture, and after that, scheduling any
+  // number of sounds through it — including from timer/event callbacks not
+  // themselves directly tied to a gesture — just works, because the
+  // permission lives on the context, not on each individual play call.
+  const audioContextRef = useRef(null)
+  const sfxBufferCacheRef = useRef({}) // { [sound]: AudioBuffer }
+  const sfxSourceNodesRef = useRef([]) // currently-playing SFX source nodes, for stopAudio()
+
+  const getAudioContext = useCallback(() => {
+    if (!audioContextRef.current) {
+      const Ctx = window.AudioContext || window.webkitAudioContext
+      if (Ctx) audioContextRef.current = new Ctx()
+    }
+    return audioContextRef.current
+  }, [])
   // Incremented every time playback is stopped or restarted. An in-flight
   // playNarration() fetch checks this before acting on its result, so a
   // slow request that resolves after the user has already navigated away
@@ -233,29 +253,46 @@ export default function StoryPlayer() {
   // Generate and play sfx via ElevenLabs, with in-memory cache
   const playSfx = useCallback(async (sound) => {
     try {
-      let b64 = sfxCacheRef.current[sound]
-      if (!b64) {
-        const res = await fetch('/api/generate-sfx', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sound })
-        })
-        if (!res.ok) return
-        const data = await res.json()
-        b64 = data.b64
-        sfxCacheRef.current[sound] = b64
+      const ctx = getAudioContext()
+      if (!ctx) return // Web Audio API unsupported — silently skip, same as before
+
+      let buffer = sfxBufferCacheRef.current[sound]
+      if (!buffer) {
+        let b64 = sfxCacheRef.current[sound]
+        if (!b64) {
+          const res = await fetch('/api/generate-sfx', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sound })
+          })
+          if (!res.ok) return
+          const data = await res.json()
+          b64 = data.b64
+          sfxCacheRef.current[sound] = b64
+        }
+        const binary = atob(b64)
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+        buffer = await ctx.decodeAudioData(bytes.buffer)
+        sfxBufferCacheRef.current[sound] = buffer
       }
-      const audio = new Audio(`data:audio/mpeg;base64,${b64}`)
-      audio.volume = 0.35
-      sfxAudioElementsRef.current.push(audio)
-      audio.onended = () => {
-        sfxAudioElementsRef.current = sfxAudioElementsRef.current.filter(a => a !== audio)
+
+      const source = ctx.createBufferSource()
+      source.buffer = buffer
+      const gain = ctx.createGain()
+      gain.gain.value = 0.35 // matches the previous audio.volume = 0.35
+      source.connect(gain)
+      gain.connect(ctx.destination)
+
+      sfxSourceNodesRef.current.push(source)
+      source.onended = () => {
+        sfxSourceNodesRef.current = sfxSourceNodesRef.current.filter((s) => s !== source)
       }
-      audio.play().catch(() => {})
+      source.start(0)
     } catch (err) {
       console.error('SFX error:', err)
     }
-  }, [])
+  }, [getAudioContext])
 
   const stopAudio = useCallback(() => {
     // Invalidates any in-flight playNarration() request — see playTokenRef.
@@ -269,8 +306,8 @@ export default function StoryPlayer() {
     // to the (now paused) audio's own timeupdate/onboundary events, which
     // stop firing the moment playback stops, and the myToken check guards
     // any stray one regardless.
-    sfxAudioElementsRef.current.forEach(a => { try { a.pause() } catch {} })
-    sfxAudioElementsRef.current = []
+    sfxSourceNodesRef.current.forEach((s) => { try { s.stop() } catch {} })
+    sfxSourceNodesRef.current = []
     setSpeaking(false)
     setLoadingAudio(false)
   }, [])
@@ -408,7 +445,12 @@ export default function StoryPlayer() {
     // instead of an approximation.
     const sfxTimeline = buildSfxTimeline(sceneData.narration, sceneData.sfxCues)
     const totalWords = sceneData.narration.trim().split(/\s+/).length
-    const cueState = sfxTimeline.map(cue => ({ fraction: cue.wordIndex / totalWords, sound: cue.sound, fired: false }))
+    // Capped below 1.0 — a cue firing in the very last moment of narration
+    // doesn't have time to finish before the scene transitions to the next
+    // one, which was very likely why SFX sometimes sounded cut off when the
+    // page turned on desktop.
+    const MAX_CUE_FRACTION = 0.7
+    const cueState = sfxTimeline.map(cue => ({ fraction: Math.min(cue.wordIndex / totalWords, MAX_CUE_FRACTION), sound: cue.sound, fired: false }))
 
     audio.ontimeupdate = () => {
       if (myToken !== playTokenRef.current) return
@@ -424,6 +466,24 @@ export default function StoryPlayer() {
 
     audio.onended = () => {
       if (myToken !== playTokenRef.current) return
+      // TEMPORARY DIAGNOSTIC — remove once the skipped-last-sentence issue
+      // is confirmed and fixed. Helps tell apart two different possible
+      // causes: if actualDuration is notably shorter than
+      // expectedDurationRough, the TTS generation itself likely cut the
+      // audio short (an OpenAI-side issue). If actualDuration and
+      // currentTime-at-ended are close to each other but the audio still
+      // sounded cut off, it's more likely a browser/blob duration-reporting
+      // bug (a client-side playback issue instead).
+      const wordCount = sceneData.narration.trim().split(/\s+/).length
+      const expectedDurationRough = wordCount / (2.5 * 0.9) // ~words-per-second at TTS speed 0.9
+      console.log('Narration ended — diagnostic:', {
+        sceneIndex,
+        wordCount,
+        expectedDurationRoughSec: expectedDurationRough.toFixed(1),
+        actualDurationSec: audio.duration?.toFixed(1),
+        currentTimeAtEndedSec: audio.currentTime?.toFixed(1),
+        narrationPreview: sceneData.narration.slice(0, 60) + '…'
+      })
       setSpeaking(false)
 
       const nextIndex = sceneIndex + 1
@@ -470,11 +530,25 @@ export default function StoryPlayer() {
 
     // Start fetching the scene AFTER this one now, in the background, while
     // this one plays.
+    // Prefetch two scenes ahead, not just one — gives the audio more lead
+    // time to be ready before it's actually needed, reducing how often the
+    // slower fallback path (fresh fetch + effect-based play, which can hit
+    // browser autoplay blocking) gets used at all.
     prefetchNextNarration(sceneIndex + 1)
+    prefetchNextNarration(sceneIndex + 2)
   }, [scenes, playSfx, goNext, prefetchNextNarration])
 
   const playNarration = useCallback(async () => {
     if (speaking || loadingAudio || !current?.narration) return
+    // Unlocks the shared AudioContext used for SFX. This must happen here
+    // (synchronously, before any await) rather than in a useEffect, because
+    // every call path into playNarration ultimately traces back to a real
+    // user gesture (a button click or the spacebar), and AudioContext only
+    // grants "unlocked" status when resume() is called within that trusted
+    // window. Once unlocked it stays unlocked for the rest of the page
+    // session, so this only actually matters on the very first call.
+    const ctx = getAudioContext()
+    if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {})
     // Snapshot (not incremented yet) — checked after the await below so a
     // stopAudio() that ran in the meantime correctly abandons this request
     // instead of starting audio anyway.
@@ -510,7 +584,8 @@ export default function StoryPlayer() {
       u.rate = 0.88; u.pitch = 1.05
 
       const sfxTimeline = buildSfxTimeline(current.narration, current.sfxCues)
-      const cueState = sfxTimeline.map(cue => ({ wordIndex: cue.wordIndex, sound: cue.sound, fired: false }))
+      const totalWordCount = current.narration.trim().split(/\s+/).length
+      const cueState = sfxTimeline.map(cue => ({ wordIndex: Math.min(cue.wordIndex, Math.floor(totalWordCount * 0.7)), sound: cue.sound, fired: false }))
       let wordsReached = 0
 
       u.onboundary = (event) => {
@@ -537,7 +612,7 @@ export default function StoryPlayer() {
       setSpeaking(true)
       window.speechSynthesis.speak(u)
     }
-  }, [current, speaking, loadingAudio, goNext, playSfx, scene, fetchTtsAudio, playSceneAudio])
+  }, [current, speaking, loadingAudio, goNext, playSfx, scene, fetchTtsAudio, playSceneAudio, getAudioContext])
 
   // Keep a ref to the latest playNarration so the auto-play effect below
   // never calls a stale closure from before the scene index changed.
@@ -573,6 +648,9 @@ export default function StoryPlayer() {
       Object.values(audioCacheRef.current).forEach((url) => {
         if (typeof url === 'string' && url.startsWith('blob:')) URL.revokeObjectURL(url)
       })
+      if (audioContextRef.current) {
+        audioContextRef.current.close().catch(() => {})
+      }
     }
   }, [stopAudio])
 
