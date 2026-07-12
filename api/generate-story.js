@@ -64,7 +64,7 @@ Return this exact JSON shape:
           "sound": "A short natural language description of the sound effect for a children's storybook — warm, gentle, and age-appropriate. Be specific, textured, and tied to exactly what's happening at that moment (not generic). Vary the sonic palette across the story — don't reuse the same sound twice. Examples: 'gentle ocean waves lapping on a sandy shore, a single seagull calling in the distance', 'magical sparkle chime rising in pitch, like fairy dust catching the light', 'friendly dragon purring low and warm, a rumble like distant thunder but cosy', 'floorboards creaking softly underfoot in an old wooden clubhouse', 'the papery rustle of a treasure map being unrolled', 'a single joyful gasp followed by delighted giggling'. Never use scary, violent, or distressing sounds."
         }
       ]
-      Note: include roughly ONE sfxCue per sentence in the narration — nearly every sentence should have a sound tied to its key action or detail, not just 1-3 per whole scene. triggerPhrase must be an exact substring of the narration text. Every sound description must be distinct — reflect the specific action/detail of its sentence, not a repeated stock sound.
+      SFX approach: first read the whole scene as one moment and decide what it would actually sound like if you were standing there — the setting's ambience, the character's action, the emotional beat — THEN find natural points in the narration text to anchor each of those sounds via triggerPhrase. Do not mechanically force one sound onto every sentence in isolation; a cue that's technically tied to a word but doesn't fit the moment as a whole is worse than no cue at all. At least 2 sfxCues per scene, and don't add a 3rd unless the scene genuinely has a third distinct sound worth hearing — quality and fit over quantity. triggerPhrase must be an exact substring of the narration text. Every sound description must be distinct across the whole story — don't reuse the same sound twice.
     }
   ]
 }`
@@ -101,6 +101,40 @@ Return this exact JSON shape:
       const match = text.match(/\{[\s\S]*\}/)
       if (match) story = JSON.parse(match[0])
       else throw new Error('Could not parse story JSON')
+    }
+
+    // The prompt asks for at least 2 sfxCues per scene, but a model
+    // instruction is a request, not a guarantee — top up any scene that
+    // came back under that floor rather than trusting it blindly. Uses
+    // guaranteed-valid triggerPhrases (actual substrings of that scene's own
+    // narration — the start and the end of it) so buildSfxTimeline can
+    // always place them, spread across the scene rather than bunched.
+    const FALLBACK_SOUNDS = [
+      'a gentle magical shimmer, sparkling and warm',
+      'a soft happy giggle',
+      'birds singing sweetly in the distance',
+      'a warm contented sigh',
+      'a light breeze rustling through leaves',
+      'a cheerful little chime, bright and playful'
+    ]
+    if (Array.isArray(story?.scenes)) {
+      story.scenes.forEach((scene) => {
+        if (!scene.narration) return
+        if (!Array.isArray(scene.sfxCues)) scene.sfxCues = []
+        const usedSounds = new Set(scene.sfxCues.map((c) => c.sound))
+        const words = scene.narration.trim().split(/\s+/)
+        const anchors = [
+          words.slice(0, 3).join(' '),
+          words.slice(Math.max(0, words.length - 3)).join(' ')
+        ]
+        let anchorIdx = 0
+        while (scene.sfxCues.length < 2 && anchorIdx < anchors.length) {
+          const fallback = FALLBACK_SOUNDS.find((s) => !usedSounds.has(s)) || FALLBACK_SOUNDS[0]
+          scene.sfxCues.push({ triggerPhrase: anchors[anchorIdx], sound: fallback })
+          usedSounds.add(fallback)
+          anchorIdx += 1
+        }
+      })
     }
 
     res.status(200).json(story)

@@ -101,11 +101,10 @@ export default function StoryPlayer() {
   const [waitingForNext, setWaitingForNext] = useState(false)
   const audioRef = useRef(null)
   const sfxCacheRef = useRef({})
-  // SFX timers/elements need to be reachable from stopAudio() (called on
+  // Playing SFX need to be reachable from stopAudio() (called on
   // navigation), not just from playNarration's own onended/onerror handlers
-  // — otherwise stopping narration early left scheduled/playing SFX running
+  // — otherwise stopping narration early left already-playing SFX running
   // on their own with nothing to cancel them.
-  const sfxTimersRef = useRef([])
   const sfxAudioElementsRef = useRef([])
   // Incremented every time playback is stopped or restarted. An in-flight
   // playNarration() fetch checks this before acting on its result, so a
@@ -263,12 +262,13 @@ export default function StoryPlayer() {
     playTokenRef.current += 1
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null }
     if (window.speechSynthesis) window.speechSynthesis.cancel()
-    // Cancel SFX not yet triggered for this narration...
-    sfxTimersRef.current.forEach(t => clearTimeout(t))
-    sfxTimersRef.current = []
-    // ...and stop any SFX that's already actively playing. This is the fix
-    // for SFX continuing to play after narration is paused/stopped — they
-    // previously had nothing linking them to the narration's stop action.
+    // Stop any SFX that's already actively playing. This is the fix for SFX
+    // continuing to play after narration is paused/stopped — they previously
+    // had nothing linking them to the narration's stop action. Pending
+    // (not-yet-fired) cues need no separate cancellation now — they're tied
+    // to the (now paused) audio's own timeupdate/onboundary events, which
+    // stop firing the moment playback stops, and the myToken check guards
+    // any stray one regardless.
     sfxAudioElementsRef.current.forEach(a => { try { a.pause() } catch {} })
     sfxAudioElementsRef.current = []
     setSpeaking(false)
@@ -394,19 +394,36 @@ export default function StoryPlayer() {
     audioRef.current = audio
     setLoadingAudio(false)
 
+    // SFX used to fire from setTimeout — a bare timer with no connection to
+    // any actively-playing trusted audio, which is very plausibly why they
+    // got silently blocked on mobile even after narration itself started
+    // working (narration's play() is tied to a real gesture/media event;
+    // setTimeout looks the same to the browser whether it followed one or
+    // not). Tying each cue to this audio element's own timeupdate event
+    // instead means every SFX play() call happens from inside a handler on
+    // audio that's already trusted and actively playing — same underlying
+    // fix as the narration chaining, applied to SFX. Scaled by actual
+    // playback progress (currentTime/duration) rather than an estimated
+    // words-per-second guess, so timing also tracks the real TTS speed
+    // instead of an approximation.
     const sfxTimeline = buildSfxTimeline(sceneData.narration, sceneData.sfxCues)
-    const wordsPerSecond = 2.5 * 0.9
-    sfxTimersRef.current = []
-    sfxTimeline.forEach(cue => {
-      const delayMs = (cue.wordIndex / wordsPerSecond) * 1000
-      const timer = setTimeout(() => { if (myToken === playTokenRef.current) playSfx(cue.sound) }, delayMs)
-      sfxTimersRef.current.push(timer)
-    })
+    const totalWords = sceneData.narration.trim().split(/\s+/).length
+    const cueState = sfxTimeline.map(cue => ({ fraction: cue.wordIndex / totalWords, sound: cue.sound, fired: false }))
+
+    audio.ontimeupdate = () => {
+      if (myToken !== playTokenRef.current) return
+      if (!audio.duration || isNaN(audio.duration)) return
+      const progress = audio.currentTime / audio.duration
+      cueState.forEach(cue => {
+        if (!cue.fired && progress >= cue.fraction) {
+          cue.fired = true
+          playSfx(cue.sound)
+        }
+      })
+    }
 
     audio.onended = () => {
       if (myToken !== playTokenRef.current) return
-      sfxTimersRef.current.forEach(t => clearTimeout(t))
-      sfxTimersRef.current = []
       setSpeaking(false)
 
       const nextIndex = sceneIndex + 1
@@ -431,8 +448,6 @@ export default function StoryPlayer() {
     }
     audio.onerror = () => {
       if (myToken !== playTokenRef.current) return
-      sfxTimersRef.current.forEach(t => clearTimeout(t))
-      sfxTimersRef.current = []
       setSpeaking(false)
       setLoadingAudio(false)
     }
@@ -484,32 +499,39 @@ export default function StoryPlayer() {
 
     if (requestToken !== playTokenRef.current) return
 
-    // Fallback to browser TTS with SFX word boundary triggers
+    // Fallback to browser TTS. SpeechSynthesisUtterance has no timeupdate
+    // equivalent, but its onboundary event fires per-word from the actual
+    // trusted speech playback — same underlying principle, adapted to this
+    // API: count word-boundary events as they happen and fire cues whose
+    // wordIndex has been reached, instead of an untethered setTimeout.
     if (window.speechSynthesis) {
       const myToken = ++playTokenRef.current
       const u = new SpeechSynthesisUtterance(current.narration)
       u.rate = 0.88; u.pitch = 1.05
 
       const sfxTimeline = buildSfxTimeline(current.narration, current.sfxCues)
-      const wordsPerSecond = 2.5 * 0.88
-      sfxTimersRef.current = []
-      sfxTimeline.forEach(cue => {
-        const delayMs = (cue.wordIndex / wordsPerSecond) * 1000
-        const timer = setTimeout(() => { if (myToken === playTokenRef.current) playSfx(cue.sound) }, delayMs)
-        sfxTimersRef.current.push(timer)
-      })
+      const cueState = sfxTimeline.map(cue => ({ wordIndex: cue.wordIndex, sound: cue.sound, fired: false }))
+      let wordsReached = 0
+
+      u.onboundary = (event) => {
+        if (myToken !== playTokenRef.current) return
+        if (event.name && event.name !== 'word') return
+        wordsReached += 1
+        cueState.forEach(cue => {
+          if (!cue.fired && wordsReached >= cue.wordIndex) {
+            cue.fired = true
+            playSfx(cue.sound)
+          }
+        })
+      }
 
       u.onend = () => {
         if (myToken !== playTokenRef.current) return
-        sfxTimersRef.current.forEach(t => clearTimeout(t))
-        sfxTimersRef.current = []
         setSpeaking(false)
         goNext(true)
       }
       u.onerror = () => {
         if (myToken !== playTokenRef.current) return
-        sfxTimersRef.current.forEach(t => clearTimeout(t))
-        sfxTimersRef.current = []
         setSpeaking(false)
       }
       setSpeaking(true)
