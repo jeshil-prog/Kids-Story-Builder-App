@@ -1,6 +1,8 @@
-import React, { useState, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import React, { useState, useRef, useEffect } from 'react'
+import { useNavigate, Link } from 'react-router-dom'
 import { useStore } from '../lib/store'
+import { supabase } from '../lib/supabaseClient'
+import { useAuth } from '../lib/AuthContext'
 import { Avatar, Button, Input, Spinner } from '../components/UI'
 
 const PERSONALITIES = ['Brave', 'Curious', 'Funny', 'Kind', 'Adventurous', 'Clever', 'Gentle', 'Playful']
@@ -253,11 +255,24 @@ function CharacterForm({ initial, onSave, onCancel }) {
   )
 }
 
+const TIER_CHARACTER_LIMITS = { free: 2, tier1: 6, tier2: Infinity }
+
 export default function Characters() {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const { characters, addCharacter, updateCharacter, deleteCharacter } = useStore()
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState(null)
+  const [tier, setTier] = useState('free')
+
+  useEffect(() => {
+    supabase.from('subscriptions').select('tier, status').eq('user_id', user.id).single()
+      .then(({ data }) => setTier(data?.status === 'active' ? (data.tier || 'free') : 'free'))
+  }, [user.id])
+
+  const ownCharacters = characters.filter(c => c.ownerId === user.id)
+  const limit = TIER_CHARACTER_LIMITS[tier] ?? TIER_CHARACTER_LIMITS.free
+  const atLimit = ownCharacters.length >= limit
 
   return (
     <div style={{ padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 20, overflowY: 'auto', flex: 1 }}>
@@ -267,9 +282,15 @@ export default function Characters() {
           <h2 style={{ fontSize: 20, fontWeight: 600 }}>Characters</h2>
         </div>
         {!adding && (
-          <Button onClick={() => setAdding(true)} style={{ padding: '8px 16px', fontSize: 13 }}>
-            + Add character
-          </Button>
+          atLimit ? (
+            <Link to="/profile" style={{ fontSize: 12, color: '#534AB7', fontWeight: 600, textDecoration: 'none' }}>
+              🔒 {ownCharacters.length}/{limit} used — upgrade for more
+            </Link>
+          ) : (
+            <Button onClick={() => setAdding(true)} style={{ padding: '8px 16px', fontSize: 13 }}>
+              + Add character
+            </Button>
+          )
         )}
       </div>
 

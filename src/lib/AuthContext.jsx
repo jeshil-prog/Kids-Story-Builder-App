@@ -16,17 +16,17 @@ export function AuthProvider({ children }) {
     return () => subscription.unsubscribe()
   }, [])
 
-  const sendMagicLink = async (email) => {
+  // Google handles identity verification entirely — no password, no
+  // confirmation email, no custom SMTP dependency. Supabase auto-creates
+  // the user (and, via the DB trigger, their profiles + free subscription
+  // row) the first time someone completes this.
+  const signInWithGoogle = async () => {
     setAuthError(null)
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: window.location.origin }
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.origin }
     })
-    if (error) {
-      setAuthError(error.message)
-      return false
-    }
-    return true
+    if (error) setAuthError(error.message)
   }
 
   const logout = () => supabase.auth.signOut()
@@ -35,7 +35,7 @@ export function AuthProvider({ children }) {
     session,
     user: session?.user ?? null,
     loading: session === undefined,
-    sendMagicLink,
+    signInWithGoogle,
     authError,
     logout
   }

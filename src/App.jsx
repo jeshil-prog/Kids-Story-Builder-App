@@ -6,9 +6,12 @@ import Create from './pages/Create'
 import StoryPlayer from './pages/StoryPlayer'
 import Library from './pages/Library'
 import Login from './pages/Login'
+import Welcome from './pages/Welcome'
 import Friends from './pages/Friends'
+import Profile from './pages/Profile'
 import { AuthProvider, useAuth } from './lib/AuthContext'
 import { useStore } from './lib/store'
+import { supabase } from './lib/supabaseClient'
 
 function FullPageSpinner() {
   return (
@@ -19,17 +22,18 @@ function FullPageSpinner() {
   )
 }
 
-// Wraps every real page. Redirects to /login if there's no session, and —
-// just as importantly — waits for the store's Supabase-backed character/
-// story data to actually finish loading before rendering children. Every
-// page (Home, StoryPlayer, etc) was originally built assuming that data was
-// already synchronously present from localStorage on first render; this is
-// what preserves that same guarantee now that it's an async fetch instead.
+// Wraps every real page. Redirects to /login if there's no session, sends
+// first-time users to /welcome to pick a plan before anything else, and
+// waits for the store's Supabase-backed character/story data to finish
+// loading before rendering children — every page was originally built
+// assuming that data was already synchronously present from localStorage on
+// first render, so this preserves that same guarantee now that it's async.
 function RequireAuth({ children }) {
   const { user, loading } = useAuth()
   const init = useStore(s => s.init)
   const initialized = useStore(s => s.initialized)
   const storeUserId = useStore(s => s.userId)
+  const [onboarded, setOnboarded] = React.useState(undefined) // undefined = not checked yet
 
   React.useEffect(() => {
     if (!loading && user && storeUserId !== user.id) {
@@ -37,9 +41,26 @@ function RequireAuth({ children }) {
     }
   }, [loading, user, storeUserId, init])
 
+  React.useEffect(() => {
+    if (loading || !user) return
+    supabase.from('profiles').select('onboarded').eq('id', user.id).single()
+      .then(({ data }) => setOnboarded(!!data?.onboarded))
+  }, [loading, user])
+
   if (loading) return <FullPageSpinner />
   if (!user) return <Navigate to="/login" replace />
+  if (onboarded === undefined) return <FullPageSpinner />
+  if (!onboarded) return <Navigate to="/welcome" replace />
   if (!initialized || storeUserId !== user.id) return <FullPageSpinner />
+  return children
+}
+
+// /welcome needs a session but deliberately does NOT require onboarding to
+// already be complete — that's the whole point of the page.
+function RequireSession({ children }) {
+  const { user, loading } = useAuth()
+  if (loading) return <FullPageSpinner />
+  if (!user) return <Navigate to="/login" replace />
   return children
 }
 
@@ -54,7 +75,8 @@ function Nav() {
   }, [])
   const isStory = loc.pathname.startsWith('/story/')
   const isLogin = loc.pathname === '/login'
-  if (isStory || isLogin) return null
+  const isWelcome = loc.pathname === '/welcome'
+  if (isStory || isLogin || isWelcome) return null
 
   const tabs = [
     { to: '/', label: 'Home', icon: '🏠' },
@@ -62,6 +84,7 @@ function Nav() {
     { to: '/characters', label: 'Characters', icon: '🧒' },
     { to: '/friends', label: 'Friends', icon: '🤝' },
     { to: '/library', label: 'Library', icon: '📚' },
+    { to: '/profile', label: 'Profile', icon: '👤' },
   ]
 
   return (
@@ -115,10 +138,12 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/welcome" element={<RequireSession><Welcome /></RequireSession>} />
       <Route path="/" element={<RequireAuth><Home /></RequireAuth>} />
       <Route path="/create" element={<RequireAuth><Create /></RequireAuth>} />
       <Route path="/characters" element={<RequireAuth><Characters /></RequireAuth>} />
       <Route path="/friends" element={<RequireAuth><Friends /></RequireAuth>} />
+      <Route path="/profile" element={<RequireAuth><Profile /></RequireAuth>} />
       <Route path="/story/:id" element={<RequireAuth><StoryPlayer /></RequireAuth>} />
       <Route path="/library" element={<RequireAuth><Library /></RequireAuth>} />
     </Routes>

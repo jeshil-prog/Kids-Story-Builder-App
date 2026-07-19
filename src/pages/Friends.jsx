@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
+import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../lib/AuthContext'
 
@@ -10,6 +11,12 @@ export default function Friends() {
   const [connections, setConnections] = useState([]) // all rows involving me, any status
   const [loadingConnections, setLoadingConnections] = useState(true)
   const [profilesById, setProfilesById] = useState({})
+  const [tier, setTier] = useState(null) // null = not checked yet
+
+  useEffect(() => {
+    supabase.from('subscriptions').select('tier, status').eq('user_id', user.id).single()
+      .then(({ data }) => setTier(data?.status === 'active' ? (data.tier || 'free') : 'free'))
+  }, [user.id])
 
   const loadConnections = useCallback(async () => {
     if (!user) return
@@ -74,6 +81,22 @@ export default function Friends() {
 
   const incoming = connections.filter(c => c.addressee_id === user?.id && c.status === 'pending')
   const accepted = connections.filter(c => c.status === 'accepted')
+
+  if (tier === 'free') {
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 40, textAlign: 'center', gap: 12 }}>
+        <div style={{ fontSize: 40 }}>🤝</div>
+        <p style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>Friend sharing is a paid feature</p>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', maxWidth: 320, margin: 0 }}>
+          Upgrade to Tier 1 or Tier 2 to connect with other families and use each other's characters in your stories.
+        </p>
+        <Link to="/profile" style={{ marginTop: 8, padding: '10px 18px', borderRadius: 10, background: '#534AB7', color: 'white', fontSize: 13, fontWeight: 600, textDecoration: 'none' }}>
+          View plans
+        </Link>
+      </div>
+    )
+  }
+  if (tier === null) return null
 
   return (
     <div style={{ flex: 1, padding: 20, maxWidth: 560, margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>

@@ -1,6 +1,8 @@
-import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import React, { useState, useEffect } from 'react'
+import { useNavigate, Link } from 'react-router-dom'
 import { useStore } from '../lib/store'
+import { supabase } from '../lib/supabaseClient'
+import { useAuth } from '../lib/AuthContext'
 import { Avatar, Button, SectionLabel, Spinner } from '../components/UI'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -28,6 +30,7 @@ const GEN_STEPS = [
 
 export default function Create() {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const { characters, saveStory } = useStore()
   const [selectedChars, setSelectedChars] = useState([])
   const [prompt, setPrompt] = useState('')
@@ -38,6 +41,18 @@ export default function Create() {
   const [genStep, setGenStep] = useState(0)
   const [genDetail, setGenDetail] = useState('')
   const [error, setError] = useState(null)
+  const [limitReached, setLimitReached] = useState(false)
+  const [tier, setTier] = useState('free')
+
+  useEffect(() => {
+    supabase.from('subscriptions').select('tier, status').eq('user_id', user.id).single()
+      .then(({ data }) => setTier(data?.status === 'active' ? (data.tier || 'free') : 'free'))
+  }, [user.id])
+
+  // Free tier only gets the first two styles — the rest are visible but
+  // locked, with an upgrade prompt, rather than hidden entirely.
+  const CORE_STYLE_IDS = ['Watercolour', 'Pixar-like']
+  const styleLocked = (styleId) => tier === 'free' && !CORE_STYLE_IDS.includes(styleId)
 
   const toggleChar = (id) => setSelectedChars(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id])
   const chosenChars = characters.filter(c => selectedChars.includes(c.id))
@@ -46,22 +61,37 @@ export default function Create() {
   const generate = async () => {
     setGenerating(true)
     setError(null)
+    setLimitReached(false)
     setGenStep(0)
     setGenDetail('Sending your story to the writer…')
 
     try {
+      const { data: { session } } = await supabase.auth.getSession()
+
       // Step 1: Generate story text + scene breakdown
       setGenStep(0)
       setGenDetail('Claude is writing your story…')
       const storyRes = await fetch('/api/generate-story', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`
+        },
         body: JSON.stringify({
           characters: chosenChars.map(c => ({ name: c.name, age: c.age, personality: c.personality, role: c.role })),
           prompt, genre, style, length
         })
       })
-      if (!storyRes.ok) throw new Error('Story generation failed. Check your API keys.')
+      if (!storyRes.ok) {
+        const errBody = await storyRes.json().catch(() => ({}))
+        if (errBody.limitReached) {
+          setLimitReached(true)
+          setError(errBody.error)
+          setGenerating(false)
+          return
+        }
+        throw new Error(errBody.error || 'Story generation failed. Check your API keys.')
+      }
       const story = await storyRes.json()
 
       setGenStep(1)
@@ -206,7 +236,13 @@ export default function Create() {
           <div style={{ background: '#FCEBEB', border: '1px solid #F09595', borderRadius: 12, padding: '12px 16px', color: '#501313', fontSize: 13, maxWidth: 340, textAlign: 'center', marginTop: 24 }}>
             {error}
             <br/>
-            <button onClick={() => { setGenerating(false); setError(null) }} style={{ marginTop: 8, color: '#A32D2D', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13 }}>Go back</button>
+            {limitReached && (
+              <Link to="/profile" style={{ color: '#534AB7', fontSize: 13, fontWeight: 600, display: 'inline-block', marginTop: 8 }}>
+                View plans →
+              </Link>
+            )}
+            <br/>
+            <button onClick={() => { setGenerating(false); setError(null); setLimitReached(false) }} style={{ marginTop: 8, color: '#A32D2D', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13 }}>Go back</button>
           </div>
         )}
       </div>
@@ -303,22 +339,33 @@ export default function Create() {
           <h2 style={{ fontSize: 16, fontWeight: 600 }}>Visual style</h2>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-          {STYLES.map(s => (
-            <div
-              key={s.id}
-              onClick={() => setStyle(s.id)}
-              style={{
-                padding: '14px 10px', borderRadius: 14, cursor: 'pointer', textAlign: 'center',
-                border: `${style === s.id ? '2px' : '0.5px'} solid ${style === s.id ? '#534AB7' : 'var(--border)'}`,
-                background: style === s.id ? '#EEEDFE' : 'var(--surface-card)',
-                transition: 'all 0.15s'
-              }}
-            >
-              <div style={{ fontSize: 26, marginBottom: 6 }}>{s.icon}</div>
-              <div style={{ fontSize: 11, fontWeight: 500, color: style === s.id ? '#3C3489' : 'var(--text-secondary)' }}>{s.id}</div>
-            </div>
-          ))}
+          {STYLES.map(s => {
+            const locked = styleLocked(s.id)
+            return (
+              <div
+                key={s.id}
+                onClick={() => !locked && setStyle(s.id)}
+                style={{
+                  padding: '14px 10px', borderRadius: 14, cursor: locked ? 'not-allowed' : 'pointer', textAlign: 'center',
+                  border: `${style === s.id ? '2px' : '0.5px'} solid ${style === s.id ? '#534AB7' : 'var(--border)'}`,
+                  background: style === s.id ? '#EEEDFE' : 'var(--surface-card)',
+                  opacity: locked ? 0.45 : 1,
+                  position: 'relative',
+                  transition: 'all 0.15s'
+                }}
+              >
+                {locked && <div style={{ position: 'absolute', top: 6, right: 8, fontSize: 11 }}>🔒</div>}
+                <div style={{ fontSize: 26, marginBottom: 6 }}>{s.icon}</div>
+                <div style={{ fontSize: 11, fontWeight: 500, color: style === s.id ? '#3C3489' : 'var(--text-secondary)' }}>{s.id}</div>
+              </div>
+            )
+          })}
         </div>
+        {tier === 'free' && (
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
+            🔒 More styles available on <Link to="/profile" style={{ color: '#534AB7' }}>paid plans</Link>
+          </p>
+        )}
       </section>
 
       <div style={{ height: '0.5px', background: 'var(--border)' }} />

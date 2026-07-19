@@ -1,7 +1,44 @@
 export const config = { maxDuration: 300 }
 
+import { supabaseAdmin } from './_lib/supabaseAdmin.js'
+
+const TIER_LIMITS = { free: 3, tier1: 25, tier2: 200 }
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
+
+  // Enforced here, not just hidden in the UI — this is the actual
+  // cost-incurring step, so a direct API call needs to be blocked too, not
+  // just the "Create" button in the app.
+  const authHeader = req.headers.authorization || ''
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
+  if (!token) return res.status(401).json({ error: 'Not authenticated' })
+
+  const { data: userData, error: authError } = await supabaseAdmin.auth.getUser(token)
+  if (authError || !userData?.user) return res.status(401).json({ error: 'Invalid session' })
+  const userId = userData.user.id
+
+  const { data: sub } = await supabaseAdmin.from('subscriptions').select('tier, status').eq('user_id', userId).single()
+  const tier = (sub?.status === 'active' && sub?.tier) ? sub.tier : 'free'
+  const limit = TIER_LIMITS[tier] ?? TIER_LIMITS.free
+
+  const startOfMonth = new Date()
+  startOfMonth.setDate(1)
+  startOfMonth.setHours(0, 0, 0, 0)
+
+  const { count, error: countError } = await supabaseAdmin
+    .from('stories')
+    .select('id', { count: 'exact', head: true })
+    .eq('owner_id', userId)
+    .gte('created_at', startOfMonth.toISOString())
+
+  if (countError) {
+    console.error('Failed to check story count:', countError)
+    return res.status(500).json({ error: 'Could not verify your usage — try again in a moment' })
+  }
+  if ((count || 0) >= limit) {
+    return res.status(403).json({ error: `You've used all ${limit} stories included in your plan this month. Upgrade for more.`, limitReached: true })
+  }
 
   const { characters, prompt, genre, style, length } = req.body
 
