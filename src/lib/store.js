@@ -1,141 +1,170 @@
 import { create } from 'zustand'
-import { v4 as uuidv4 } from 'uuid'
+import { supabase } from './supabaseClient'
 
-// Safe localStorage save — strips large base64 data to avoid quota errors.
-// photoUrl (the durable S3 URL) is deliberately KEPT — it's a tiny string
-// with no quota impact, and it's what makes character photos actually
-// survive a page reload. photoBase64 stays in-memory-only by design.
-//
-// `photo` (an inline base64 data-URL thumbnail) used to be truncated to
-// 2000 characters as a compromise to avoid blowing the quota — but a real
-// compressed thumbnail is almost always longer than that, so this was
-// slicing the base64 stream off mid-way, producing corrupted/undecodable
-// image data (a broken-image icon) rather than a lower-quality one. Now
-// that photoUrl exists as a reliable full source, `photo` is dropped
-// entirely rather than stored broken.
-const saveCharacters = (chars) => {
-  try {
-    const slim = chars.map(c => ({
-      ...c,
-      photoBase64: undefined,  // don't store raw base64
-      photo: null              // superseded by photoUrl — see comment above
-    }))
-    localStorage.setItem('sd_characters', JSON.stringify(slim))
-  } catch (e) {
-    console.warn('Could not save characters:', e.message)
-  }
-}
+// --- field mapping helpers -------------------------------------------------
+// The rest of the app reads/writes characters and stories using the same
+// camelCase shape it always has (c.photoUrl, s.createdAt, etc). Supabase's
+// Postgres columns are snake_case. Mapping happens only here, once, so nothing
+// else in the app needs to change how it accesses these objects.
 
-const saveStories = (stories) => {
-  try {
-    // Strip scene images from story list — stored separately
-    const slim = stories.map(s => ({
-      ...s,
-      characters: s.characters?.map(c => ({
-        ...c,
-        photo: null,
-        photoBase64: undefined
-      })),
-      scenes: s.scenes?.map(({ imageData, imageType, ...rest }) => rest)
-    }))
-    localStorage.setItem('sd_stories', JSON.stringify(slim))
-  } catch (e) {
-    console.warn('Could not save stories:', e.message)
-    // If still failing, clear old stories and try with just the newest
-    try {
-      localStorage.removeItem('sd_stories')
-    } catch {}
-  }
-}
+const characterFromRow = (row) => ({
+  id: row.id,
+  ownerId: row.owner_id,
+  name: row.name,
+  age: row.age,
+  role: row.role,
+  personality: row.personality,
+  photoUrl: row.photo_url,
+  description: row.description,
+  createdAt: row.created_at
+})
 
-const loadImages = (storyId, scenes) => {
-  return scenes.map((scene, i) => {
-    // If scene already has S3 imageUrl, use it — no need to load from localStorage
-    if (scene.imageUrl) return scene
-    // Fall back to legacy localStorage base64 images
-    try {
-      const raw = localStorage.getItem(`sd_img_${storyId}_${i}`)
-      if (raw) {
-        const { imageData, imageType } = JSON.parse(raw)
-        return { ...scene, imageData, imageType }
-      }
-    } catch {}
-    return scene
-  })
-}
+const characterToRow = (char, ownerId) => ({
+  owner_id: ownerId,
+  name: char.name,
+  age: char.age || null,
+  role: char.role || null,
+  personality: char.personality || null,
+  photo_url: char.photoUrl || null,
+  description: char.description || null
+})
 
-const deleteImages = (storyId, sceneCount = 20) => {
-  for (let i = 0; i < sceneCount; i++) {
-    try { localStorage.removeItem(`sd_img_${storyId}_${i}`) } catch {}
-  }
-}
+const storyFromRow = (row) => ({
+  id: row.id,
+  ownerId: row.owner_id,
+  title: row.title,
+  tagline: row.tagline,
+  genre: row.genre,
+  style: row.style,
+  scenes: row.scenes || [],
+  characters: row.characters || [],
+  createdAt: row.created_at
+})
 
-const load = (key, fallback) => {
-  try { return JSON.parse(localStorage.getItem(key)) ?? fallback } catch { return fallback }
-}
+// -----------------------------------------------------------------------
 
 export const useStore = create((set, get) => ({
-  characters: load('sd_characters', []),
-  stories: load('sd_stories', []),
+  characters: [],
+  stories: [],
+  userId: null,
+  initialized: false,
 
-  addCharacter: (char) => {
-    const next = [...get().characters, { ...char, id: uuidv4() }]
-    set({ characters: next })  // keep photoBase64 in memory
-    saveCharacters(next)       // strips photoBase64 for localStorage
-  },
-  updateCharacter: (id, patch) => {
-    const next = get().characters.map(c => c.id === id ? { ...c, ...patch } : c)
-    set({ characters: next })  // keep photoBase64 in memory
-    saveCharacters(next)       // strips photoBase64 for localStorage
-  },
-  deleteCharacter: (id) => {
-    const next = get().characters.filter(c => c.id !== id)
-    set({ characters: next })
-    saveCharacters(next)
-  },
-
-  saveStory: (story) => {
-    const id = story.id || uuidv4()
-
-    // Save each scene image separately
-    if (story.scenes) {
-      story.scenes.forEach((scene, i) => {
-        if (scene.imageData) {
-          try {
-            localStorage.setItem(`sd_img_${id}_${i}`, JSON.stringify({
-              imageData: scene.imageData,
-              imageType: scene.imageType || 'image/jpeg'
-            }))
-          } catch { /* image won't persist but story still works */ }
-        }
-      })
+  // Called once auth resolves (see AuthContext-driven effect in App.jsx).
+  // Fetches everything this user can see — own characters AND, thanks to
+  // Row Level Security, any accepted connection's characters too, with no
+  // extra query needed for that: the database filters it for us.
+  init: async (userId) => {
+    if (!userId) {
+      set({ characters: [], stories: [], userId: null, initialized: true })
+      return
     }
+    set({ userId })
+    const [{ data: characters, error: charErr }, { data: stories, error: storyErr }] = await Promise.all([
+      supabase.from('characters').select('*').order('created_at', { ascending: false }),
+      supabase.from('stories').select('*').eq('owner_id', userId).order('created_at', { ascending: false })
+    ])
+    if (charErr) console.error('Failed to load characters:', charErr)
+    if (storyErr) console.error('Failed to load stories:', storyErr)
+    set({
+      characters: (characters || []).map(characterFromRow),
+      stories: (stories || []).map(storyFromRow),
+      initialized: true
+    })
+  },
 
-    const existing = get().stories.find(s => s.id === id)
-    const storyMeta = { ...story, id, createdAt: story.createdAt || Date.now() }
-    const next = existing
-      ? get().stories.map(s => s.id === id ? storyMeta : s)
-      : [storyMeta, ...get().stories]
+  // Clears local state on logout so a different account signing in on the
+  // same tab never sees a flash of the previous user's data.
+  reset: () => set({ characters: [], stories: [], userId: null, initialized: false }),
 
-    set({ stories: next })
-    saveStories(next)
+  addCharacter: async (char) => {
+    const { userId } = get()
+    const { data, error } = await supabase
+      .from('characters')
+      .insert(characterToRow(char, userId))
+      .select()
+      .single()
+    if (error) { console.error('Failed to add character:', error); throw error }
+    const newChar = characterFromRow(data)
+    set({ characters: [newChar, ...get().characters] })
+    return newChar
+  },
+
+  updateCharacter: async (id, patch) => {
+    const { userId } = get()
+    const { data, error } = await supabase
+      .from('characters')
+      .update(characterToRow({ ...get().characters.find(c => c.id === id), ...patch }, userId))
+      .eq('id', id)
+      .select()
+      .single()
+    if (error) { console.error('Failed to update character:', error); throw error }
+    const updated = characterFromRow(data)
+    set({ characters: get().characters.map(c => c.id === id ? updated : c) })
+    return updated
+  },
+
+  deleteCharacter: async (id) => {
+    const { error } = await supabase.from('characters').delete().eq('id', id)
+    if (error) { console.error('Failed to delete character:', error); throw error }
+    set({ characters: get().characters.filter(c => c.id !== id) })
+  },
+
+  // Deliberately NOT awaited by callers during story creation — see
+  // Create.jsx. Updates local state immediately (synchronously, from the
+  // caller's point of view) so navigation and the reader never wait on the
+  // network; the actual database write happens in the background. This is
+  // what keeps the "navigate to the reader instantly" behaviour we built
+  // earlier intact rather than reintroducing a wait exactly where we'd
+  // removed one.
+  saveStory: async (story) => {
+    const { userId } = get()
+    const id = story.id
+    const existingIndex = get().stories.findIndex(s => s.id === id)
+
+    // Optimistic local update first — instant from the caller's perspective.
+    const optimistic = { ...story, ownerId: userId }
+    set({
+      stories: existingIndex >= 0
+        ? get().stories.map((s, i) => i === existingIndex ? optimistic : s)
+        : [optimistic, ...get().stories]
+    })
+
+    const row = {
+      id,
+      owner_id: userId,
+      title: story.title,
+      tagline: story.tagline || null,
+      genre: story.genre || null,
+      style: story.style || null,
+      scenes: story.scenes || [],
+      characters: story.characters || []
+    }
+    const { data, error } = await supabase.from('stories').upsert(row).select().single()
+    if (error) { console.error('Failed to save story:', error); throw error }
+    const saved = storyFromRow(data)
+    set({ stories: get().stories.map(s => s.id === id ? saved : s) })
     return id
   },
 
-  getStory: (id) => {
-    const story = get().stories.find(s => s.id === id)
-    if (!story) return null
-    return {
-      ...story,
-      scenes: loadImages(id, story.scenes || [])
+  // Looks up the story locally first (already loaded by init(), or by an
+  // earlier saveStory() in this session) — no network round-trip in the
+  // common case. Falls back to fetching it directly for a fresh page load /
+  // direct link, where local state may not have it yet.
+  getStory: async (id) => {
+    const local = get().stories.find(s => s.id === id)
+    if (local) return local
+
+    const { data, error } = await supabase.from('stories').select('*').eq('id', id).single()
+    if (error) {
+      console.error('Failed to fetch story:', error)
+      return null
     }
+    return storyFromRow(data)
   },
 
-  deleteStory: (id) => {
-    const story = get().stories.find(s => s.id === id)
-    deleteImages(id, story?.scenes?.length)
-    const next = get().stories.filter(s => s.id !== id)
-    set({ stories: next })
-    saveStories(next)
+  deleteStory: async (id) => {
+    const { error } = await supabase.from('stories').delete().eq('id', id)
+    if (error) { console.error('Failed to delete story:', error); throw error }
+    set({ stories: get().stories.filter(s => s.id !== id) })
   }
 }))

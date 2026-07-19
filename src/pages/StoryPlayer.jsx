@@ -54,6 +54,7 @@ export default function StoryPlayer() {
   const navigate = useNavigate()
   const { getStory, saveStory } = useStore()
   const [story, setStory] = useState(null)
+  const [storyLoading, setStoryLoading] = useState(true)
   const [scene, setScene] = useState(0)
   const isLandscape = () => window.innerWidth > window.innerHeight
   const [projector, setProjector] = useState(true)
@@ -141,8 +142,14 @@ export default function StoryPlayer() {
 
   // Load story on mount
   useEffect(() => {
-    const s = getStory(id)
-    setStory(s)
+    let cancelled = false
+    setStoryLoading(true)
+    getStory(id).then((s) => {
+      if (cancelled) return
+      setStory(s)
+      setStoryLoading(false)
+    })
+    return () => { cancelled = true }
   }, [id])
 
   // Backfill poller: images generate asynchronously in the background and
@@ -653,6 +660,12 @@ export default function StoryPlayer() {
       }
     }
   }, [stopAudio])
+
+  if (storyLoading) return (
+    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 40, minHeight: '100dvh', background: '#0d0b1a' }}>
+      <div style={{ width: 32, height: 32, borderRadius: '50%', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: '#7F77DD', animation: 'spin 1s linear infinite' }} />
+    </div>
+  )
 
   if (!story) return (
     <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16, padding: 40 }}>

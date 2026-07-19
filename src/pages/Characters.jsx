@@ -275,7 +275,7 @@ export default function Characters() {
 
       {adding && (
         <CharacterForm
-          onSave={(data) => { addCharacter(data); setAdding(false); navigate('/create?autoselect=new') }}
+          onSave={async (data) => { await addCharacter(data); setAdding(false); navigate('/create?autoselect=new') }}
           onCancel={() => setAdding(false)}
         />
       )}
@@ -293,7 +293,7 @@ export default function Characters() {
           ? <CharacterForm
               key={c.id}
               initial={c}
-              onSave={(data) => { updateCharacter(c.id, data); setEditing(null) }}
+              onSave={async (data) => { await updateCharacter(c.id, data); setEditing(null) }}
               onCancel={() => setEditing(null)}
             />
           : (

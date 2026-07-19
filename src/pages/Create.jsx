@@ -111,7 +111,7 @@ export default function Create() {
         scenes: story.scenes,
         createdAt: Date.now()
       }
-      saveStory(fullStory)
+      saveStory(fullStory).catch((err) => console.error('Background story save failed:', err))
       navigate(`/story/${id}`)
     } catch (err) {
       setError(err.message)
