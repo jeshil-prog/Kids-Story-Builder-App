@@ -23,10 +23,26 @@ export default function Welcome() {
     // capturing an initial preference, not gating on payment success.
     // Someone who cancels checkout can still upgrade later from Profile,
     // rather than being stuck seeing this screen on every visit.
-    const { error: onboardError } = await supabase.from('profiles').update({ onboarded: true }).eq('id', user.id)
+    //
+    // .select() here matters: if RLS silently blocks this update from
+    // matching any row, Supabase reports that as a normal success with NO
+    // error — the only way to detect it is checking whether any row was
+    // actually returned.
+    const { data: updated, error: onboardError } = await supabase
+      .from('profiles')
+      .update({ onboarded: true })
+      .eq('id', user.id)
+      .select()
+
     if (onboardError) {
       console.error('Failed to mark onboarding complete:', onboardError)
       alert(`Something went wrong (${onboardError.message}). Please try again or refresh the page.`)
+      setSubmitting(false)
+      return
+    }
+    if (!updated || updated.length === 0) {
+      console.error('Onboarding update matched zero rows — likely blocked by RLS.', { userId: user.id })
+      alert('Could not save your plan choice (permission issue) — please refresh and try again, or let the developer know.')
       setSubmitting(false)
       return
     }
