@@ -23,7 +23,13 @@ export default function Welcome() {
     // capturing an initial preference, not gating on payment success.
     // Someone who cancels checkout can still upgrade later from Profile,
     // rather than being stuck seeing this screen on every visit.
-    await supabase.from('profiles').update({ onboarded: true }).eq('id', user.id)
+    const { error: onboardError } = await supabase.from('profiles').update({ onboarded: true }).eq('id', user.id)
+    if (onboardError) {
+      console.error('Failed to mark onboarding complete:', onboardError)
+      alert(`Something went wrong (${onboardError.message}). Please try again or refresh the page.`)
+      setSubmitting(false)
+      return
+    }
 
     if (plan === 'free') {
       navigate('/')
