@@ -1,5 +1,7 @@
 export const config = { maxDuration: 10 }
 
+import { redisGet } from './_lib/redis.js'
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' })
 
@@ -10,22 +12,15 @@ export default async function handler(req, res) {
   const results = []
 
   for (let i = 0; i < count; i++) {
-    const key = `story:${storyId}:scene:${i}`
-    try {
-      const r = await fetch(`${process.env.UPSTASH_REDIS_REST_URL}`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(['GET', key])
-      })
-      const data = await r.json()
-      const value = data.result ? JSON.parse(data.result) : null
-      results.push(value)
-    } catch {
-      results.push(null)
-    }
+    const [imageStatus, audioStatus] = await Promise.all([
+      redisGet(`story:${storyId}:scene:${i}`).catch(() => null),
+      redisGet(`story:${storyId}:scene:${i}:audio`).catch(() => null)
+    ])
+    results.push({
+      ...(imageStatus || {}),
+      narrationStatus: audioStatus?.status || null,
+      narrationUrl: audioStatus?.narrationUrl || null
+    })
   }
 
   return res.status(200).json({ scenes: results })

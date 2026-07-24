@@ -129,7 +129,8 @@ export default function Create() {
             style,
             storyId: id,
             sceneIndex: i,
-            characters: charPayload
+            characters: charPayload,
+            narrationText: scene.narration
           })
         }).catch((err) => console.error(`Scene ${i} submission failed:`, err))
       })

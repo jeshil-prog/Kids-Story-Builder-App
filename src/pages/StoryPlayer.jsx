@@ -202,7 +202,8 @@ export default function StoryPlayer() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             imagePrompt: sceneData.imagePrompt, style: story.style,
-            storyId: id, sceneIndex, characters: charPayload
+            storyId: id, sceneIndex, characters: charPayload,
+            narrationText: sceneData.narration
           })
         })
       } catch (err) {
@@ -218,11 +219,16 @@ export default function StoryPlayer() {
           const { scenes: statuses } = await res.json()
           let changed = false
           const updatedScenes = story.scenes.map((sc, i) => {
+            let updated = sc
             if (!sc.imageUrl && statuses[i]?.status === 'done') {
               changed = true
-              return { ...sc, imageUrl: statuses[i].imageUrl }
+              updated = { ...updated, imageUrl: statuses[i].imageUrl }
             }
-            return sc
+            if (!updated.narrationUrl && statuses[i]?.narrationUrl) {
+              changed = true
+              updated = { ...updated, narrationUrl: statuses[i].narrationUrl }
+            }
+            return updated
           })
           if (changed) {
             const updatedStory = { ...story, scenes: updatedScenes }
@@ -230,19 +236,26 @@ export default function StoryPlayer() {
             saveStory(updatedStory)
           }
 
-          // Kick off retries for any rate-limited scenes, independent of the
-          // "are we done" check below. Staggered ~4s apart across scenes in
-          // this same tick — without this, several scenes rate-limited
-          // together would retry all at once and likely re-trigger the same
-          // limit we're trying to recover from.
+          // Kick off retries for any rate-limited/failed scenes, independent
+          // of the "are we done" check below. Staggered ~4s apart across
+          // scenes in this same tick — without this, several scenes
+          // rate-limited together would retry all at once and likely
+          // re-trigger the same limit we're trying to recover from. Covers
+          // narration failures too, not just image ones — submit-image-job
+          // now skips redoing whichever of the two already succeeded, so
+          // resubmitting here is safe even if only one of them failed.
           const toRetry = statuses
             .map((st, i) => ({ st, i }))
-            .filter(({ st, i }) => st?.status === 'error' && st?.errorCode === 'rate_limit_exceeded' && !updatedScenes[i].imageUrl)
+            .filter(({ st, i }) => {
+              const imageFailed = st?.status === 'error' && st?.errorCode === 'rate_limit_exceeded' && !updatedScenes[i].imageUrl
+              const narrationFailed = st?.narrationStatus === 'error' && !updatedScenes[i].narrationUrl
+              return imageFailed || narrationFailed
+            })
           toRetry.forEach(({ i }, orderIndex) => {
             setTimeout(() => retryRateLimitedScene(i), orderIndex * 4000)
           })
 
-          const stillMissing = updatedScenes.some((sc) => !sc.imageUrl && !sc.imageData)
+          const stillMissing = updatedScenes.some((sc) => !isSceneReady(sc))
           if (!stillMissing) return // done — stop polling
         }
       } catch (err) {
@@ -305,7 +318,6 @@ export default function StoryPlayer() {
     // Invalidates any in-flight playNarration() request — see playTokenRef.
     playTokenRef.current += 1
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null }
-    if (window.speechSynthesis) window.speechSynthesis.cancel()
     // Stop any SFX that's already actively playing. This is the fix for SFX
     // continuing to play after narration is paused/stopped — they previously
     // had nothing linking them to the narration's stop action. Pending
@@ -326,10 +338,16 @@ export default function StoryPlayer() {
   // and should auto-play the new scene's narration too once it lands
   // (continuous audiobook-style playthrough). Manual next-button/arrow-key
   // presses call this with no argument, so they just move the page.
+  // A scene is only "ready" once BOTH its image and its narration audio
+  // exist — narration used to be generated live during playback (no image
+  // check needed for it), but it's now pre-generated alongside the image at
+  // creation time, so advancing needs to wait on both the same way.
+  const isSceneReady = (sc) => !!(sc?.imageUrl || sc?.imageData) && !!sc?.narrationUrl
+
   const goNext = useCallback((continueReading = false) => {
     const nextIndex = scene + 1
     if (nextIndex >= scenes.length) { stopAudio(); return }
-    const nextReady = !!(scenes[nextIndex]?.imageUrl || scenes[nextIndex]?.imageData)
+    const nextReady = isSceneReady(scenes[nextIndex])
     stopAudio()
     if (nextReady) {
       if (continueReading) autoPlayNextRef.current = true
@@ -376,7 +394,7 @@ export default function StoryPlayer() {
   useEffect(() => {
     if (!waitingForNext) return
     const nextIndex = scene + 1
-    const nextReady = !!(scenes[nextIndex]?.imageUrl || scenes[nextIndex]?.imageData)
+    const nextReady = isSceneReady(scenes[nextIndex])
     if (nextReady) {
       setWaitingForNext(false)
       if (pendingContinueRef.current) autoPlayNextRef.current = true
@@ -385,53 +403,13 @@ export default function StoryPlayer() {
     }
   }, [story, waitingForNext, scene, scenes])
 
-  // Caches fetched TTS audio by scene index so continuous playback doesn't
-  // have to wait on a fresh network round-trip to OpenAI after each scene
-  // ends — that fetch (not the old artificial setTimeout, which was smaller
-  // by comparison) was the real gap between "narration ends" and "next
-  // audio.play() call", which is very plausibly why mobile Safari wasn't
-  // treating the next play() as connected enough to the original tap.
-  const audioCacheRef = useRef({}) // { [sceneIndex]: blobUrl | 'pending' }
-
-  const fetchTtsAudio = useCallback(async (narrationText) => {
-    const openAiKey = import.meta.env.VITE_OPENAI_API_KEY
-    if (!openAiKey || !narrationText) return null
-    try {
-      const res = await fetch('https://api.openai.com/v1/audio/speech', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${openAiKey}` },
-        body: JSON.stringify({ model: 'gpt-4o-mini-tts', input: narrationText, voice: 'coral', instructions: 'Speak warmly and gently, like a parent reading a bedtime story. Use a calm, expressive, storytelling tone.', speed: 0.9 })
-      })
-      if (!res.ok) return null
-      const blob = await res.blob()
-      return URL.createObjectURL(blob)
-    } catch {
-      return null
-    }
-  }, [])
-
-  const prefetchNextNarration = useCallback((nextIndex) => {
-    if (audioCacheRef.current[nextIndex]) return // already cached or in flight
-    const nextScene = scenes[nextIndex]
-    if (!nextScene?.narration) return
-    audioCacheRef.current[nextIndex] = 'pending'
-    fetchTtsAudio(nextScene.narration).then((url) => {
-      if (url) audioCacheRef.current[nextIndex] = url
-      else delete audioCacheRef.current[nextIndex]
-    })
-  }, [scenes, fetchTtsAudio])
-
   // Plays a specific scene's audio given explicit data — deliberately NOT
   // tied to the `current`/`scene` closure, so this can be called directly
   // and synchronously from within the PREVIOUS scene's own onended handler
   // for the auto-continue case. That matters because every hop through
   // React (a state update, waiting for re-render, a useEffect firing)
   // is exactly the kind of indirection iOS Safari's autoplay heuristics
-  // can treat as disconnected from the original tap and silently block —
-  // prefetching (below) removed the network-latency gap, but calling this
-  // via an effect still left a React-scheduling gap. This closes that too,
-  // for the common case where the next scene's image and audio are both
-  // already ready by the time this one ends.
+  // can treat as disconnected from the original tap and silently block.
   const playSceneAudio = useCallback((sceneIndex, sceneData, url) => {
     const myToken = ++playTokenRef.current
     const audio = new Audio(url)
@@ -473,44 +451,30 @@ export default function StoryPlayer() {
 
     audio.onended = () => {
       if (myToken !== playTokenRef.current) return
-      // TEMPORARY DIAGNOSTIC — remove once the skipped-last-sentence issue
-      // is confirmed and fixed. Helps tell apart two different possible
-      // causes: if actualDuration is notably shorter than
-      // expectedDurationRough, the TTS generation itself likely cut the
-      // audio short (an OpenAI-side issue). If actualDuration and
-      // currentTime-at-ended are close to each other but the audio still
-      // sounded cut off, it's more likely a browser/blob duration-reporting
-      // bug (a client-side playback issue instead).
-      const wordCount = sceneData.narration.trim().split(/\s+/).length
-      const expectedDurationRough = wordCount / (2.5 * 0.9) // ~words-per-second at TTS speed 0.9
-      console.log('Narration ended — diagnostic:', {
-        sceneIndex,
-        wordCount,
-        expectedDurationRoughSec: expectedDurationRough.toFixed(1),
-        actualDurationSec: audio.duration?.toFixed(1),
-        currentTimeAtEndedSec: audio.currentTime?.toFixed(1),
-        narrationPreview: sceneData.narration.slice(0, 60) + '…'
-      })
       setSpeaking(false)
 
       const nextIndex = sceneIndex + 1
       if (nextIndex >= scenes.length) return
       const nextScene = scenes[nextIndex]
-      const nextReady = !!(nextScene?.imageUrl || nextScene?.imageData)
-      const cachedNext = audioCacheRef.current[nextIndex]
 
-      if (nextReady && cachedNext && cachedNext !== 'pending') {
+      if (isSceneReady(nextScene)) {
         // Everything's already ready — chain directly, still synchronously
         // inside this trusted onended callback. The visible page turn
         // happens in parallel via setScene, not gating playback on it.
         setScene(nextIndex)
-        playSceneAudio(nextIndex, nextScene, cachedNext)
+        playSceneAudio(nextIndex, nextScene, nextScene.narrationUrl)
       } else {
-        // Genuinely not ready yet (image still generating, or the audio
-        // prefetch hasn't resolved) — nothing faster is possible here since
-        // real data is still pending, so fall back to the wait-and-catch-up
-        // path via the effects below.
-        goNext(true)
+        // Genuinely not ready yet (image and/or narration still
+        // generating). Sync scene state to sceneIndex (the scene whose
+        // audio just actually finished) before waiting, rather than calling
+        // goNext() — goNext() derives "current scene" from React state,
+        // which can lag behind what's actually playing when several scenes
+        // have chained directly in rapid succession without React
+        // re-rendering in between each one.
+        stopAudio()
+        setScene(sceneIndex)
+        pendingContinueRef.current = true
+        setWaitingForNext(true)
       }
     }
     audio.onerror = () => {
@@ -534,19 +498,10 @@ export default function StoryPlayer() {
     } else {
       setSpeaking(true)
     }
+  }, [scenes, playSfx, stopAudio])
 
-    // Start fetching the scene AFTER this one now, in the background, while
-    // this one plays.
-    // Prefetch two scenes ahead, not just one — gives the audio more lead
-    // time to be ready before it's actually needed, reducing how often the
-    // slower fallback path (fresh fetch + effect-based play, which can hit
-    // browser autoplay blocking) gets used at all.
-    prefetchNextNarration(sceneIndex + 1)
-    prefetchNextNarration(sceneIndex + 2)
-  }, [scenes, playSfx, goNext, prefetchNextNarration])
-
-  const playNarration = useCallback(async () => {
-    if (speaking || loadingAudio || !current?.narration) return
+  const playNarration = useCallback(() => {
+    if (speaking || loadingAudio || !current?.narrationUrl) return
     // Unlocks the shared AudioContext used for SFX. This must happen here
     // (synchronously, before any await) rather than in a useEffect, because
     // every call path into playNarration ultimately traces back to a real
@@ -556,70 +511,16 @@ export default function StoryPlayer() {
     // session, so this only actually matters on the very first call.
     const ctx = getAudioContext()
     if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {})
-    // Snapshot (not incremented yet) — checked after the await below so a
-    // stopAudio() that ran in the meantime correctly abandons this request
-    // instead of starting audio anyway.
-    const requestToken = playTokenRef.current
-    const openAiKey = import.meta.env.VITE_OPENAI_API_KEY
 
-    if (openAiKey) {
-      const cached = audioCacheRef.current[scene]
-      if (cached && cached !== 'pending') {
-        playSceneAudio(scene, current, cached)
-        return
-      }
-      setLoadingAudio(true)
-      const url = await fetchTtsAudio(current.narration)
-      if (requestToken !== playTokenRef.current) return
-      if (url) {
-        playSceneAudio(scene, current, url)
-        return
-      }
-      setLoadingAudio(false)
-    }
-
-    if (requestToken !== playTokenRef.current) return
-
-    // Fallback to browser TTS. SpeechSynthesisUtterance has no timeupdate
-    // equivalent, but its onboundary event fires per-word from the actual
-    // trusted speech playback — same underlying principle, adapted to this
-    // API: count word-boundary events as they happen and fire cues whose
-    // wordIndex has been reached, instead of an untethered setTimeout.
-    if (window.speechSynthesis) {
-      const myToken = ++playTokenRef.current
-      const u = new SpeechSynthesisUtterance(current.narration)
-      u.rate = 0.88; u.pitch = 1.05
-
-      const sfxTimeline = buildSfxTimeline(current.narration, current.sfxCues)
-      const totalWordCount = current.narration.trim().split(/\s+/).length
-      const cueState = sfxTimeline.map(cue => ({ wordIndex: Math.min(cue.wordIndex, Math.floor(totalWordCount * 0.7)), sound: cue.sound, fired: false }))
-      let wordsReached = 0
-
-      u.onboundary = (event) => {
-        if (myToken !== playTokenRef.current) return
-        if (event.name && event.name !== 'word') return
-        wordsReached += 1
-        cueState.forEach(cue => {
-          if (!cue.fired && wordsReached >= cue.wordIndex) {
-            cue.fired = true
-            playSfx(cue.sound)
-          }
-        })
-      }
-
-      u.onend = () => {
-        if (myToken !== playTokenRef.current) return
-        setSpeaking(false)
-        goNext(true)
-      }
-      u.onerror = () => {
-        if (myToken !== playTokenRef.current) return
-        setSpeaking(false)
-      }
-      setSpeaking(true)
-      window.speechSynthesis.speak(u)
-    }
-  }, [current, speaking, loadingAudio, goNext, playSfx, scene, fetchTtsAudio, playSceneAudio, getAudioContext])
+    // Narration is now a pre-generated, stored file — created once
+    // alongside the scene's image at story-creation time, exactly like
+    // images already work. There's no live TTS call here anymore: no
+    // fetch, no cache, no rate limit to hit, and no fallback to a worse
+    // browser voice, since there's nothing left that can fail at this
+    // point — the file already exists or this scene isn't reachable yet
+    // (see isSceneReady / the waiting states above).
+    playSceneAudio(scene, current, current.narrationUrl)
+  }, [current, speaking, loadingAudio, scene, playSceneAudio, getAudioContext])
 
   // Keep a ref to the latest playNarration so the auto-play effect below
   // never calls a stale closure from before the scene index changed.
@@ -651,10 +552,6 @@ export default function StoryPlayer() {
     return () => {
       stopAudio()
       stopAmbientSfx()
-      // Release any pre-fetched audio blobs that never got played
-      Object.values(audioCacheRef.current).forEach((url) => {
-        if (typeof url === 'string' && url.startsWith('blob:')) URL.revokeObjectURL(url)
-      })
       if (audioContextRef.current) {
         audioContextRef.current.close().catch(() => {})
       }
@@ -683,7 +580,7 @@ export default function StoryPlayer() {
   // different-looking loading screens back to back. Checked BEFORE the
   // orientation prompt below — there's no reason to tell someone to rotate
   // their device before there's anything ready for them to read yet.
-  const scene0Ready = !!(scenes[0]?.imageUrl || scenes[0]?.imageData)
+  const scene0Ready = isSceneReady(scenes[0])
   if (!scene0Ready) {
     return <FinishingTouchesScreen title={story.title} onBack={() => navigate('/')} />
   }
@@ -701,7 +598,7 @@ export default function StoryPlayer() {
   }
 
   const progress = ((scene + 1) / scenes.length) * 100
-  const readyCount = scenes.filter((s) => s.imageUrl || s.imageData).length
+  const readyCount = scenes.filter(isSceneReady).length
 
   // Compact mode collapses onto a single overlay control bar (over the image)
   // instead of separate dots/controls/caption rows underneath the panel.
