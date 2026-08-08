@@ -17,6 +17,22 @@ function readRawBody(req) {
   })
 }
 
+// Stripe removed current_period_end from the top-level Subscription object
+// in the "Basil" API version (2025-03-31) — it now lives on each
+// subscription item instead. Reading the old location silently returns
+// undefined, which previously crashed the date conversion below with an
+// invalid-date error — BEFORE the database write ever ran. That crash was
+// caught by the outer try/catch and swallowed as a "handled" 200 response,
+// which is exactly why a real, successful payment never showed up as an
+// updated tier: the webhook died on this line, silently, every time.
+function getPeriodEnd(subscription) {
+  const fromItem = subscription.items?.data?.[0]?.current_period_end
+  const legacy = subscription.current_period_end // pre-Basil accounts only
+  const raw = fromItem ?? legacy
+  if (!raw) return null
+  return new Date(raw * 1000).toISOString()
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
@@ -56,7 +72,7 @@ export default async function handler(req, res) {
           stripe_subscription_id: subscription.id,
           tier,
           status: subscription.status,
-          current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+          current_period_end: getPeriodEnd(subscription),
           updated_at: new Date().toISOString()
         })
         break
@@ -79,7 +95,7 @@ export default async function handler(req, res) {
           stripe_subscription_id: subscription.id,
           tier,
           status: subscription.status,
-          current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+          current_period_end: getPeriodEnd(subscription),
           updated_at: new Date().toISOString()
         })
         break
@@ -109,8 +125,14 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ received: true })
   } catch (err) {
+    // Changed from always-200 to a real 500 here. Always returning 200 (even
+    // on an unexpected internal error) meant Stripe considered the event
+    // "successfully delivered" and would never retry it automatically — which
+    // is exactly how the current_period_end crash above went unnoticed and
+    // unrecovered. Our writes are idempotent upserts, so it's safe to let
+    // Stripe's automatic retry (over the following couple of days) try again
+    // rather than silently losing the event forever.
     console.error('Stripe webhook processing error:', err)
-    // Still 200 — a bug on our end shouldn't make Stripe hammer retries.
-    return res.status(200).json({ received: true, error: err.message })
+    return res.status(500).json({ error: err.message })
   }
 }

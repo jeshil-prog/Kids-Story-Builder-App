@@ -87,7 +87,6 @@ export default function Create() {
         if (errBody.limitReached) {
           setLimitReached(true)
           setError(errBody.error)
-          setGenerating(false)
           return
         }
         throw new Error(errBody.error || 'Story generation failed. Check your API keys.')

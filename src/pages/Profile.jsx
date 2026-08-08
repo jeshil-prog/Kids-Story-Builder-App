@@ -17,13 +17,45 @@ export default function Profile() {
   const [subscription, setSubscription] = useState(null)
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
+  const [checkoutPolling, setCheckoutPolling] = useState(false)
+
+  const fetchSubscription = () =>
+    supabase.from('subscriptions').select('*').eq('user_id', user.id).single()
+      .then(({ data }) => { setSubscription(data); return data })
 
   useEffect(() => {
-    supabase.from('subscriptions').select('*').eq('user_id', user.id).single()
-      .then(({ data }) => { setSubscription(data); setLoading(false) })
+    fetchSubscription().then(() => setLoading(false))
   }, [user.id])
 
   const checkoutResult = searchParams.get('checkout') // 'success' | 'cancelled' | null
+
+  // The webhook that actually updates your tier runs asynchronously after
+  // Stripe redirects you back here — there's a real gap (usually a few
+  // seconds) where this page would otherwise show stale "Free" data with no
+  // way to know it's about to change. This polls until the tier reflects the
+  // upgrade (or gives up after a reasonable window and asks you to refresh).
+  useEffect(() => {
+    if (checkoutResult !== 'success') return
+    setCheckoutPolling(true)
+    let cancelled = false
+    let attempts = 0
+    const maxAttempts = 10 // ~20s at 2s apart
+
+    const poll = async () => {
+      if (cancelled) return
+      attempts += 1
+      const data = await fetchSubscription()
+      const upgraded = data?.status === 'active' && (data?.tier === 'tier1' || data?.tier === 'tier2')
+      if (upgraded || attempts >= maxAttempts) {
+        if (!cancelled) setCheckoutPolling(false)
+        return
+      }
+      setTimeout(poll, 2000)
+    }
+    poll()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkoutResult])
 
   const tier = subscription?.status === 'active' ? (subscription?.tier || 'free') : 'free'
   const info = TIER_INFO[tier]
@@ -65,8 +97,12 @@ export default function Profile() {
       <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 20px' }}>{user.email}</p>
 
       {checkoutResult === 'success' && (
-        <div style={{ padding: '10px 14px', borderRadius: 10, background: '#E7F7F0', color: '#1D9E75', fontSize: 13, marginBottom: 16 }}>
-          🎉 Subscription active! It may take a few seconds to reflect below.
+        <div style={{ padding: '10px 14px', borderRadius: 10, background: checkoutPolling ? 'var(--surface-card)' : '#E7F7F0', color: checkoutPolling ? 'var(--text-muted)' : '#1D9E75', fontSize: 13, marginBottom: 16 }}>
+          {checkoutPolling
+            ? '⏳ Confirming your subscription…'
+            : (subscription?.tier === 'tier1' || subscription?.tier === 'tier2')
+              ? '🎉 Subscription active!'
+              : "Payment succeeded, but confirming your plan is taking longer than expected — try refreshing this page in a moment, or contact support if it doesn't update."}
         </div>
       )}
       {checkoutResult === 'cancelled' && (
