@@ -67,12 +67,6 @@ function RequireSession({ children }) {
 function Nav() {
   const loc = useLocation()
   const { logout } = useAuth()
-  const [narrow, setNarrow] = React.useState(window.innerWidth < 400)
-  React.useEffect(() => {
-    const handler = () => setNarrow(window.innerWidth < 400)
-    window.addEventListener('resize', handler)
-    return () => window.removeEventListener('resize', handler)
-  }, [])
   const isStory = loc.pathname.startsWith('/story/')
   const isLogin = loc.pathname === '/login'
   const isWelcome = loc.pathname === '/welcome'
@@ -89,48 +83,86 @@ function Nav() {
 
   return (
     <>
-      {/* Top nav */}
-      <div style={{
+      <style>{`
+        .sd-topnav { display: flex; }
+        .sd-bottomnav { display: none; }
+        @media (max-width: 720px) {
+          .sd-topnav { display: none; }
+          .sd-bottomnav { display: flex; }
+          .sd-page-content { padding-bottom: calc(58px + env(safe-area-inset-bottom, 0px)); }
+        }
+      `}</style>
+
+      {/* Desktop: full top bar with text labels, same as before */}
+      <div className="sd-topnav" style={{
         background: 'var(--surface-nav)',
         borderBottom: '0.5px solid var(--border)',
         padding: '0 16px',
-        paddingTop: 'env(safe-area-inset-top, 0px)',
-        display: 'flex', alignItems: 'center', gap: 8,
-        height: 'calc(52px + env(safe-area-inset-top, 0px))',
-        flexShrink: 0, width: '100%', boxSizing: 'border-box',
-        overflowX: 'hidden'
+        alignItems: 'center', gap: 8,
+        height: '52px',
+        flexShrink: 0, width: '100%', boxSizing: 'border-box'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
           <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#534AB7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>🌙</div>
-          {!narrow && <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--text-primary)' }}>StoryDream</span>}
+          <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--text-primary)' }}>StoryDream</span>
         </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 2, alignItems: 'center', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 2, alignItems: 'center' }}>
           {tabs.map(t => (
             <NavLink
               key={t.to}
               to={t.to}
               end={t.to === '/'}
-              aria-label={t.label}
               style={({ isActive }) => ({
-                padding: narrow ? '6px 8px' : '6px 10px', borderRadius: 8, fontSize: narrow ? 15 : 12,
+                padding: '6px 10px', borderRadius: 8, fontSize: 12,
                 color: isActive ? '#3C3489' : 'var(--text-secondary)',
                 background: isActive ? '#EEEDFE' : 'transparent',
                 fontWeight: isActive ? 600 : 400,
                 textDecoration: 'none', transition: 'all 0.15s',
-                whiteSpace: 'nowrap', flexShrink: 0
+                whiteSpace: 'nowrap'
               })}
             >
-              {narrow ? t.icon : t.label}
+              {t.label}
             </NavLink>
           ))}
           <button
             onClick={logout}
-            aria-label="Log out"
-            style={{ marginLeft: 4, padding: narrow ? '6px 8px' : '6px 10px', borderRadius: 8, fontSize: narrow ? 15 : 12, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
+            style={{ marginLeft: 4, padding: '6px 10px', borderRadius: 8, fontSize: 12, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}
           >
-            {narrow ? '🚪' : 'Log out'}
+            Log out
           </button>
         </div>
+      </div>
+
+      {/* Mobile: fixed bottom tab bar — the standard pattern for primary
+          mobile navigation, rather than squeezing 6 destinations into a
+          horizontal top row. No "Log out" here — it's already on the
+          Profile page itself, so this isn't losing anything, just removing
+          a redundant, space-competing entry. */}
+      <div className="sd-bottomnav" style={{
+        position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 100,
+        background: 'var(--surface-nav)',
+        borderTop: '0.5px solid var(--border)',
+        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        justifyContent: 'space-around', alignItems: 'stretch',
+        boxSizing: 'border-box'
+      }}>
+        {tabs.map(t => (
+          <NavLink
+            key={t.to}
+            to={t.to}
+            end={t.to === '/'}
+            aria-label={t.label}
+            style={({ isActive }) => ({
+              flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
+              padding: '8px 2px 6px',
+              color: isActive ? '#3C3489' : 'var(--text-secondary)',
+              textDecoration: 'none'
+            })}
+          >
+            <span style={{ fontSize: 20, lineHeight: 1 }}>{t.icon}</span>
+            <span style={{ fontSize: 10, fontWeight: 500 }}>{t.label}</span>
+          </NavLink>
+        ))}
       </div>
     </>
   )
@@ -158,7 +190,7 @@ export default function App() {
       <BrowserRouter>
         <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100dvh', background: 'var(--surface-0)', overflowX: 'hidden' }}>
           <Nav />
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', width: '100%', overflowX: 'hidden' }}>
+          <div className="sd-page-content" style={{ flex: 1, display: 'flex', flexDirection: 'column', width: '100%', overflowX: 'hidden' }}>
             <AppRoutes />
           </div>
         </div>
