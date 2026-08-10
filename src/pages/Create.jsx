@@ -70,7 +70,7 @@ export default function Create() {
 
       // Step 1: Generate story text + scene breakdown
       setGenStep(0)
-      setGenDetail('Claude is writing your story…')
+      setGenDetail('Dreaming up your story…')
       const storyRes = await fetch('/api/generate-story', {
         method: 'POST',
         headers: {
@@ -100,38 +100,41 @@ export default function Create() {
 
       // Step 2: Submit all scene image jobs (async — each returns almost
       // instantly, actual generation finishes later via OpenAI's webhook).
-      // Submitted all at once, no artificial stagger. OpenAI's 5/min limit on
-      // input-image requests means several of these will predictably come
-      // back rate-limited — that's fine and expected, not an error: the
-      // webhook's retry-with-backoff logic (in webhook-openai-image.js)
-      // absorbs that automatically. Naturally spreading retries over time
-      // adapts to whatever the real limit is, rather than us guessing a fixed
-      // interval up front.
       //
-      // Deliberately NOT waiting for any of this before navigating — the
-      // reader lands on the story immediately once the text is ready, and
-      // StoryPlayer holds at whichever scene is currently loaded until the
-      // next one's image arrives, rather than making the user sit on this
-      // loading screen. That's what makes a slow/rate-limited image
-      // structurally unable to look like a "timeout" to the reader: there's
-      // no wait here for it to blow through.
+      // Staggered ~15s apart (comfortably under OpenAI's confirmed 5/min
+      // limit on input-image requests, with margin), rather than firing all
+      // at once. Firing everything simultaneously GUARANTEED several scenes
+      // would hit that rate limit on their very first attempt for any story
+      // over 5 scenes — not a rare edge case, the predictable default
+      // outcome — and leaning on retries to recover from a self-inflicted,
+      // entirely knowable limit was the wrong shape of fix. The retry system
+      // (webhook + client backfill poller) still exists as a safety net for
+      // genuine transient failures, but pacing the initial submission means
+      // we shouldn't need it nearly as often.
+      //
+      // This does NOT delay navigation — setTimeout only staggers the
+      // background fetch calls themselves; the reader still opens instantly
+      // once the text is ready, exactly as before.
       setGenStep(2)
       setGenDetail('Sending your scenes off to be illustrated…')
 
+      const STAGGER_MS = 15000
       const charPayload = chosenChars.map(c => ({ name: c.name, photoBase64: c.photoBase64 || null, photoUrl: c.photoUrl || null, photoMime: c.photoMime || 'image/jpeg', description: c.description || null }))
       story.scenes.forEach((scene, i) => {
-        fetch('/api/submit-image-job', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            imagePrompt: scene.imagePrompt,
-            style,
-            storyId: id,
-            sceneIndex: i,
-            characters: charPayload,
-            narrationText: scene.narration
-          })
-        }).catch((err) => console.error(`Scene ${i} submission failed:`, err))
+        setTimeout(() => {
+          fetch('/api/submit-image-job', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              imagePrompt: scene.imagePrompt,
+              style,
+              storyId: id,
+              sceneIndex: i,
+              characters: charPayload,
+              narrationText: scene.narration
+            })
+          }).catch((err) => console.error(`Scene ${i} submission failed:`, err))
+        }, i * STAGGER_MS)
       })
 
       const fullStory = {

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useStore } from '../lib/store'
 import { buildSfxTimeline, stopAmbientSfx } from '../lib/sfx'
 
-function FinishingTouchesScreen({ title, onBack }) {
+function FinishingTouchesScreen({ title, onBack, stuck }) {
   const MESSAGES = [
     { emoji: '🎨', text: 'Painting your first page…' },
     { emoji: '🖌️', text: 'Adding the finishing touches…' },
@@ -12,10 +12,13 @@ function FinishingTouchesScreen({ title, onBack }) {
   ]
   const [idx, setIdx] = useState(0)
   useEffect(() => {
+    if (stuck) return
     const t = setInterval(() => setIdx(i => (i + 1) % MESSAGES.length), 2800)
     return () => clearInterval(t)
-  }, [])
-  const msg = MESSAGES[idx]
+  }, [stuck])
+  const msg = stuck
+    ? { emoji: '😕', text: "This page is taking much longer than expected" }
+    : MESSAGES[idx]
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 0, padding: 32, background: 'var(--surface-0)', position: 'relative', overflow: 'hidden', minHeight: '100vh' }}>
@@ -35,14 +38,14 @@ function FinishingTouchesScreen({ title, onBack }) {
         }}>{s}</div>
       ))}
 
-      <div style={{ fontSize: 72, marginBottom: 24, animation: 'bounce 1.5s ease-in-out infinite' }}>
+      <div style={{ fontSize: 72, marginBottom: 24, animation: stuck ? undefined : 'bounce 1.5s ease-in-out infinite' }}>
         {msg.emoji}
       </div>
       <p style={{ fontSize: 22, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8, textAlign: 'center' }}>
         {msg.text}
       </p>
       <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 8, textAlign: 'center', maxWidth: 280 }}>
-        {title}
+        {stuck ? 'Sorry about this — please go back and try creating the story again.' : title}
       </p>
       <button onClick={onBack} style={{ marginTop: 16, color: '#534AB7', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13 }}>← Back home</button>
     </div>
@@ -162,6 +165,7 @@ export default function StoryPlayer() {
   // than from inside a webhook avoids ever needing a function invocation to
   // sleep through a long backoff, which risks Vercel's duration limits.
   const backfillRef = useRef(false)
+  const [stuckSceneIndices, setStuckSceneIndices] = useState([])
   const retryCountsRef = useRef({})
   const retryLastAttemptRef = useRef({})
   const MAX_RETRIES_PER_SCENE = 5
@@ -236,24 +240,39 @@ export default function StoryPlayer() {
             saveStory(updatedStory)
           }
 
-          // Kick off retries for any rate-limited/failed scenes, independent
-          // of the "are we done" check below. Staggered ~4s apart across
-          // scenes in this same tick — without this, several scenes
-          // rate-limited together would retry all at once and likely
-          // re-trigger the same limit we're trying to recover from. Covers
-          // narration failures too, not just image ones — submit-image-job
-          // now skips redoing whichever of the two already succeeded, so
-          // resubmitting here is safe even if only one of them failed.
+          // Kick off retries for any failed scenes, independent of the "are
+          // we done" check below. Staggered ~4s apart across scenes in this
+          // same tick — without this, several scenes failing together would
+          // retry all at once and likely re-trigger whatever caused the
+          // failure in the first place. Retries any error EXCEPT
+          // insufficient_quota, which won't resolve by retrying — it needs
+          // billing fixed on the OpenAI account, and retrying it just burns
+          // through the retry budget uselessly. Previously this only
+          // retried rate_limit_exceeded specifically, meaning any other
+          // error type (a dropped webhook, a different OpenAI error) would
+          // silently never retry and eventually leave the reader stuck with
+          // no explanation at all.
           const toRetry = statuses
             .map((st, i) => ({ st, i }))
             .filter(({ st, i }) => {
-              const imageFailed = st?.status === 'error' && st?.errorCode === 'rate_limit_exceeded' && !updatedScenes[i].imageUrl
+              const imageFailed = st?.status === 'error' && st?.errorCode !== 'insufficient_quota' && !updatedScenes[i].imageUrl
               const narrationFailed = st?.narrationStatus === 'error' && !updatedScenes[i].narrationUrl
               return imageFailed || narrationFailed
             })
           toRetry.forEach(({ i }, orderIndex) => {
             setTimeout(() => retryRateLimitedScene(i), orderIndex * 4000)
           })
+
+          // Surfaced once a scene has exhausted its retries and still isn't
+          // ready — previously there was no ceiling-reached feedback at all,
+          // just a poller that quietly gave up after 20 minutes leaving the
+          // reader on an unexplained spinner forever.
+          const exhausted = updatedScenes
+            .map((sc, i) => ({ sc, i }))
+            .filter(({ sc, i }) => !isSceneReady(sc) && (retryCountsRef.current[i] || 0) >= MAX_RETRIES_PER_SCENE)
+          if (exhausted.length > 0) {
+            setStuckSceneIndices(exhausted.map(({ i }) => i))
+          }
 
           const stillMissing = updatedScenes.some((sc) => !isSceneReady(sc))
           if (!stillMissing) return // done — stop polling
@@ -582,7 +601,7 @@ export default function StoryPlayer() {
   // their device before there's anything ready for them to read yet.
   const scene0Ready = isSceneReady(scenes[0])
   if (!scene0Ready) {
-    return <FinishingTouchesScreen title={story.title} onBack={() => navigate('/')} />
+    return <FinishingTouchesScreen title={story.title} onBack={() => navigate('/')} stuck={stuckSceneIndices.includes(0)} />
   }
 
   if (isTouchDevice && landscape) {
@@ -864,7 +883,11 @@ export default function StoryPlayer() {
               </div>
 
               <p style={{ textAlign: 'center', fontSize: 11, color: 'rgba(255,255,255,0.3)', paddingBottom: 16, flexShrink: 0 }}>
-                {waitingForNext ? 'Preparing the next page…' : `${scene + 1} of ${scenes.length} · Space to play · ← → to navigate`}
+                {waitingForNext
+                  ? (stuckSceneIndices.includes(scene + 1)
+                      ? "This next page is taking much longer than expected — sorry about this"
+                      : 'Preparing the next page…')
+                  : `${scene + 1} of ${scenes.length} · Space to play · ← → to navigate`}
               </p>
             </>
           )}

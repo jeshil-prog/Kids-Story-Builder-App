@@ -104,29 +104,31 @@ function Nav() {
           <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#534AB7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>🌙</div>
           {!narrow && <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--text-primary)' }}>StoryDream</span>}
         </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 2, alignItems: 'center' }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 2, alignItems: 'center', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
           {tabs.map(t => (
             <NavLink
               key={t.to}
               to={t.to}
               end={t.to === '/'}
+              aria-label={t.label}
               style={({ isActive }) => ({
-                padding: '6px 10px', borderRadius: 8, fontSize: 12,
+                padding: narrow ? '6px 8px' : '6px 10px', borderRadius: 8, fontSize: narrow ? 15 : 12,
                 color: isActive ? '#3C3489' : 'var(--text-secondary)',
                 background: isActive ? '#EEEDFE' : 'transparent',
                 fontWeight: isActive ? 600 : 400,
                 textDecoration: 'none', transition: 'all 0.15s',
-                whiteSpace: 'nowrap'
+                whiteSpace: 'nowrap', flexShrink: 0
               })}
             >
-              {t.label}
+              {narrow ? t.icon : t.label}
             </NavLink>
           ))}
           <button
             onClick={logout}
-            style={{ marginLeft: 4, padding: '6px 10px', borderRadius: 8, fontSize: 12, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}
+            aria-label="Log out"
+            style={{ marginLeft: 4, padding: narrow ? '6px 8px' : '6px 10px', borderRadius: 8, fontSize: narrow ? 15 : 12, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
           >
-            Log out
+            {narrow ? '🚪' : 'Log out'}
           </button>
         </div>
       </div>

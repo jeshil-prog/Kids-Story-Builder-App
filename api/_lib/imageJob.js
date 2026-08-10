@@ -30,6 +30,18 @@ export async function submitImageJob({ imagePrompt, style, characters, storyId, 
     .map((c) => `${c.name}: ${c.description}`)
     .join('\n')
 
+  // Always emitted, not just when a text description happens to exist — a
+  // character with no description had nothing but the reference photo
+  // itself telling the model what it actually is, which is exactly the
+  // condition under which an image model is most likely to drift toward a
+  // generic default (a human child protagonist is an extremely common
+  // default in children's-book training data), especially for a non-human
+  // character. This makes the instruction explicit regardless of whether a
+  // text description is available to reinforce it.
+  const speciesGuard = charsWithPhotos.length > 0
+    ? `CRITICAL — EXACT CHARACTER MATCH REQUIRED: Every character with an attached reference photo above MUST be drawn as EXACTLY what that photo shows — same species/type (if the reference is an animal, draw an animal; never substitute a human child), same breed/build, same coloring and markings, same distinguishing features. Do not reinterpret, humanize, or default to a generic child character under any circumstances — match the reference photo exactly.`
+    : ''
+
   const fullPrompt = `${styleDesc} children's picture book full-page illustration.
 
 THE SCENE:
@@ -37,6 +49,7 @@ ${imagePrompt}
 
 ${charNames ? `CHARACTERS IN THIS SCENE: ${charNames}.` : ''}
 ${charDescriptions ? `CHARACTER APPEARANCES (preserve exactly):\n${charDescriptions}` : ''}
+${speciesGuard}
 
 STYLE RULES: Wide cinematic composition. Rich detailed environment. Characters integrated naturally into the scene. Warm, joyful, magical atmosphere. No text or words in the image. Child-safe.`
 
