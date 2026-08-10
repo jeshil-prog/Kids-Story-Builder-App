@@ -101,16 +101,15 @@ export default function Create() {
       // Step 2: Submit all scene image jobs (async — each returns almost
       // instantly, actual generation finishes later via OpenAI's webhook).
       //
-      // Staggered ~15s apart (comfortably under OpenAI's confirmed 5/min
-      // limit on input-image requests, with margin), rather than firing all
-      // at once. Firing everything simultaneously GUARANTEED several scenes
-      // would hit that rate limit on their very first attempt for any story
-      // over 5 scenes — not a rare edge case, the predictable default
-      // outcome — and leaning on retries to recover from a self-inflicted,
-      // entirely knowable limit was the wrong shape of fix. The retry system
-      // (webhook + client backfill poller) still exists as a safety net for
-      // genuine transient failures, but pacing the initial submission means
-      // we shouldn't need it nearly as often.
+      // The first 5 scenes fire immediately, with NO delay — that's exactly
+      // OpenAI's confirmed, tested-safe limit (5/min on input-image
+      // requests), so there's no rate-limit risk in firing them all at once.
+      // Staggering ALL scenes uniformly (an earlier version of this fix)
+      // meant scene 1's job didn't even start until 15s in — but scene 0's
+      // narration only takes ~15-20s to read, so the reader would catch up
+      // to a scene whose generation had barely begun. Only scenes beyond
+      // the confirmed-safe batch actually need to wait, so only those are
+      // staggered, starting a full minute out to clear the first window.
       //
       // This does NOT delay navigation — setTimeout only staggers the
       // background fetch calls themselves; the reader still opens instantly
@@ -118,9 +117,13 @@ export default function Create() {
       setGenStep(2)
       setGenDetail('Sending your scenes off to be illustrated…')
 
+      const RATE_LIMIT_BATCH_SIZE = 5 // OpenAI's confirmed, tested-safe limit
       const STAGGER_MS = 15000
       const charPayload = chosenChars.map(c => ({ name: c.name, photoBase64: c.photoBase64 || null, photoUrl: c.photoUrl || null, photoMime: c.photoMime || 'image/jpeg', description: c.description || null }))
       story.scenes.forEach((scene, i) => {
+        const delay = i < RATE_LIMIT_BATCH_SIZE
+          ? 0
+          : 60000 + (i - RATE_LIMIT_BATCH_SIZE) * STAGGER_MS
         setTimeout(() => {
           fetch('/api/submit-image-job', {
             method: 'POST',
@@ -134,7 +137,7 @@ export default function Create() {
               narrationText: scene.narration
             })
           }).catch((err) => console.error(`Scene ${i} submission failed:`, err))
-        }, i * STAGGER_MS)
+        }, delay)
       })
 
       const fullStory = {
