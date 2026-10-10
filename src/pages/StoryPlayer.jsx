@@ -3,6 +3,55 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useStore } from '../lib/store'
 import { buildSfxTimeline, stopAmbientSfx } from '../lib/sfx'
 
+// ---- Learning mode: word highlighting -------------------------------------
+// Narration audio is a single file with no per-word timestamps, so the active
+// word is estimated from playback progress. Each word is weighted by its
+// length (longer words take longer to say) plus a small pause after commas,
+// full stops and the like. Costs nothing extra and needs no pipeline change.
+function buildWordTimings(text) {
+  const words = (text || '').trim().split(/\s+/).filter(Boolean)
+  const weights = words.map(w => {
+    const letters = w.replace(/[^\p{L}\p{N}]/gu, '').length || 1
+    let wt = 2 + letters
+    if (/[.!?]["')\]]*$/.test(w)) wt += 5
+    else if (/[,;:\u2014\u2013]["')\]]*$/.test(w)) wt += 2.5
+    return wt
+  })
+  const total = weights.reduce((a, b) => a + b, 0) || 1
+  let acc = 0
+  const ends = weights.map(wt => { acc += wt; return acc / total })
+  return { words, ends }
+}
+
+function wordIndexAt(ends, progress) {
+  for (let i = 0; i < ends.length; i++) if (progress < ends[i]) return i
+  return ends.length - 1
+}
+
+function NarrationText({ text, learning, activeIndex }) {
+  if (!learning || activeIndex < 0) return <>{text}</>
+  const words = (text || '').trim().split(/\s+/).filter(Boolean)
+  return (
+    <>
+      {words.map((w, i) => (
+        <React.Fragment key={i}>
+          <span style={{
+            borderRadius: 6,
+            padding: '1px 3px',
+            margin: '0 -3px',
+            transition: 'background 0.12s, color 0.12s',
+            background: i === activeIndex ? '#ffd24d' : 'transparent',
+            color: i === activeIndex ? '#2e1a08' : (i < activeIndex ? 'rgba(46,26,8,0.55)' : '#2e1a08'),
+            fontWeight: i === activeIndex ? 700 : 'inherit',
+            boxShadow: i === activeIndex ? '0 1px 0 rgba(120,80,0,0.35)' : 'none',
+          }}>{w}</span>
+          {i < words.length - 1 ? ' ' : ''}
+        </React.Fragment>
+      ))}
+    </>
+  )
+}
+
 function FinishingTouchesScreen({ title, onBack, stuck }) {
   const MESSAGES = [
     { emoji: '🎨', text: 'Painting your first page…' },
@@ -96,6 +145,20 @@ export default function StoryPlayer() {
   // old side-by-side landscape layout for touch devices entirely.
   const compact = isTouchDevice && !landscape
   const [speaking, setSpeaking] = useState(false)
+  // Learning mode (word highlighting while the narration plays) is the
+  // default. The choice is remembered per device; storage can be blocked
+  // (private windows), so every access is wrapped.
+  const [learningMode, setLearningMode] = useState(() => {
+    try { return localStorage.getItem('sd_reading_mode') !== 'regular' } catch { return true }
+  })
+  const [activeWord, setActiveWord] = useState(-1)
+  const toggleReadingMode = () => {
+    setLearningMode(prev => {
+      const next = !prev
+      try { localStorage.setItem('sd_reading_mode', next ? 'learning' : 'regular') } catch {}
+      return next
+    })
+  }
   const [loadingAudio, setLoadingAudio] = useState(false)
   // True when the reader has asked to advance (manually or via auto-advance
   // after narration) but the next scene's image isn't ready yet. We hold at
@@ -348,6 +411,7 @@ export default function StoryPlayer() {
     sfxSourceNodesRef.current = []
     setSpeaking(false)
     setLoadingAudio(false)
+    setActiveWord(-1)
   }, [])
 
   const scenes = story?.scenes || []
@@ -456,10 +520,16 @@ export default function StoryPlayer() {
     const MAX_CUE_FRACTION = 0.7
     const cueState = sfxTimeline.map(cue => ({ fraction: Math.min(cue.wordIndex / totalWords, MAX_CUE_FRACTION), sound: cue.sound, fired: false }))
 
+    const wordTimings = buildWordTimings(sceneData.narration)
+    let lastWord = -1
+    setActiveWord(-1)
+
     audio.ontimeupdate = () => {
       if (myToken !== playTokenRef.current) return
       if (!audio.duration || isNaN(audio.duration)) return
       const progress = audio.currentTime / audio.duration
+      const w = wordIndexAt(wordTimings.ends, progress)
+      if (w !== lastWord) { lastWord = w; setActiveWord(w) }
       cueState.forEach(cue => {
         if (!cue.fired && progress >= cue.fraction) {
           cue.fired = true
@@ -471,6 +541,7 @@ export default function StoryPlayer() {
     audio.onended = () => {
       if (myToken !== playTokenRef.current) return
       setSpeaking(false)
+      setActiveWord(-1)
 
       const nextIndex = sceneIndex + 1
       if (nextIndex >= scenes.length) return
@@ -659,6 +730,13 @@ export default function StoryPlayer() {
             </p>
           )}
         </div>
+        <button
+          onClick={toggleReadingMode}
+          aria-pressed={learningMode}
+          title={learningMode ? 'Learning mode: words light up as they are read' : 'Regular mode: plain text'}
+          style={{ background: learningMode ? 'rgba(255,210,77,0.18)' : 'rgba(255,255,255,0.1)', border: learningMode ? '0.5px solid rgba(255,210,77,0.55)' : '0.5px solid rgba(255,255,255,0.15)', borderRadius: 8, color: learningMode ? '#ffd24d' : 'rgba(255,255,255,0.7)', padding: compact ? '4px 9px' : '6px 12px', fontSize: compact ? 12 : 13, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap' }}>
+          {learningMode ? '🔤 Learning' : '📖 Regular'}
+        </button>
         <button onClick={() => { stopAudio(); toggleProjector() }} style={{ background: 'rgba(255,255,255,0.1)', border: '0.5px solid rgba(255,255,255,0.15)', borderRadius: 8, color: 'rgba(255,255,255,0.7)', padding: compact ? '4px 9px' : '6px 12px', fontSize: compact ? 12 : 13, cursor: 'pointer', flexShrink: 0 }}>
           {projector ? '⊠ Exit' : '⊡ Fullscreen'}
         </button>
@@ -733,7 +811,7 @@ export default function StoryPlayer() {
               {current?.chapter}
             </p>
             <p style={{ fontSize: 15, lineHeight: 1.65, color: '#2e1a08', fontFamily: 'Georgia, serif', margin: 0 }}>
-              {current?.narration}
+              <NarrationText text={current?.narration} learning={learningMode} activeIndex={activeWord} />
             </p>
           </div>
         </div>
@@ -780,7 +858,7 @@ export default function StoryPlayer() {
                 fontFamily: 'Georgia, serif',
                 margin: 0,
               }}>
-                {current?.narration}
+                <NarrationText text={current?.narration} learning={learningMode} activeIndex={activeWord} />
               </p>
             </div>
 
