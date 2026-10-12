@@ -19,7 +19,8 @@ export default async function handler(req, res) {
     results.push({
       ...(imageStatus || {}),
       narrationStatus: audioStatus?.status || null,
-      narrationUrl: audioStatus?.narrationUrl || null
+      narrationUrl: audioStatus?.narrationUrl || null,
+      narrationWordTimes: audioStatus?.wordTimes || null
     })
   }
 

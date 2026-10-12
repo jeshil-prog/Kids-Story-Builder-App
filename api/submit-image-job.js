@@ -51,8 +51,8 @@ export default async function handler(req, res) {
       if (existingAudio?.status !== 'done') {
         await redisSet(audioKey, { status: 'processing' }, 3600)
         narrationPromise = generateNarrationAudio({ narrationText, storyId, sceneIndex })
-          .then(async (narrationUrl) => {
-            await redisSet(audioKey, { status: 'done', narrationUrl }, 3600)
+          .then(async ({ narrationUrl, wordTimes }) => {
+            await redisSet(audioKey, { status: 'done', narrationUrl, wordTimes }, 3600)
             return narrationUrl
           })
           .catch(async (err) => {

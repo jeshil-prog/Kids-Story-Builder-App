@@ -295,6 +295,10 @@ export default function StoryPlayer() {
               changed = true
               updated = { ...updated, narrationUrl: statuses[i].narrationUrl }
             }
+            if (!updated.narrationWordTimes && statuses[i]?.narrationWordTimes) {
+              changed = true
+              updated = { ...updated, narrationWordTimes: statuses[i].narrationWordTimes }
+            }
             return updated
           })
           if (changed) {
@@ -521,6 +525,8 @@ export default function StoryPlayer() {
     const cueState = sfxTimeline.map(cue => ({ fraction: Math.min(cue.wordIndex / totalWords, MAX_CUE_FRACTION), sound: cue.sound, fired: false }))
 
     const wordTimings = buildWordTimings(sceneData.narration)
+    const exactTimes = Array.isArray(sceneData.narrationWordTimes) && sceneData.narrationWordTimes.length === wordTimings.words.length
+      ? sceneData.narrationWordTimes : null
     let lastWord = -1
     setActiveWord(-1)
 
@@ -528,7 +534,16 @@ export default function StoryPlayer() {
       if (myToken !== playTokenRef.current) return
       if (!audio.duration || isNaN(audio.duration)) return
       const progress = audio.currentTime / audio.duration
-      const w = wordIndexAt(wordTimings.ends, progress)
+      // Exact timings (from the transcription done at story creation) when
+      // the scene has them, otherwise the length based estimate.
+      let w
+      if (exactTimes) {
+        w = 0
+        const t = audio.currentTime + 0.05
+        while (w + 1 < exactTimes.length && exactTimes[w + 1] <= t) w++
+      } else {
+        w = wordIndexAt(wordTimings.ends, progress)
+      }
       if (w !== lastWord) { lastWord = w; setActiveWord(w) }
       cueState.forEach(cue => {
         if (!cue.fired && progress >= cue.fraction) {
