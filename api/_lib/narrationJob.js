@@ -12,6 +12,7 @@
 // an estimate, so timing can never block a story from being ready.
 
 import { uploadToS3 } from './s3.js'
+import { findPauses, refineWithPauses } from './wordTiming.js'
 
 const norm = (s) => (s || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
 
@@ -71,7 +72,13 @@ async function transcribeWordTimes(audioBuffer, narrationText) {
   })
   if (!res.ok) throw new Error(`Transcription failed: ${res.status} ${await res.text().catch(() => '')}`)
   const data = await res.json()
-  return alignWordTimes(narrationText, data.words || [])
+  const rough = alignWordTimes(narrationText, data.words || [])
+  if (!rough) return null
+  // Sharpen against the real pauses in the audio. If that can't be done, the
+  // rough speech to text times are used as they are.
+  const words = narrationText.trim().split(/\s+/).filter(Boolean)
+  const info = await findPauses(audioBuffer)
+  return refineWithPauses(words, rough, info)
 }
 
 export async function generateNarrationAudio({ narrationText, storyId, sceneIndex }) {
