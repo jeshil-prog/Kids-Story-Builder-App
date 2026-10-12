@@ -530,21 +530,33 @@ export default function StoryPlayer() {
     let lastWord = -1
     setActiveWord(-1)
 
+    // Word highlight runs on its own per-frame loop. The audio element's
+    // timeupdate event only fires about 4 times a second, which made the
+    // highlight move in visible jumps; reading the playback position every
+    // screen frame follows the voice smoothly. Uses exact word times from
+    // story creation when the scene has them, else the length based estimate.
+    // The loop ends by itself when playback is stopped or replaced (token).
+    const highlightTick = () => {
+      if (myToken !== playTokenRef.current) return
+      if (audio.duration && !isNaN(audio.duration)) {
+        let w
+        if (exactTimes) {
+          w = 0
+          const t = audio.currentTime + 0.04
+          while (w + 1 < exactTimes.length && exactTimes[w + 1] <= t) w++
+        } else {
+          w = wordIndexAt(wordTimings.ends, audio.currentTime / audio.duration)
+        }
+        if (w !== lastWord) { lastWord = w; setActiveWord(w) }
+      }
+      if (!audio.ended) requestAnimationFrame(highlightTick)
+    }
+    requestAnimationFrame(highlightTick)
+
     audio.ontimeupdate = () => {
       if (myToken !== playTokenRef.current) return
       if (!audio.duration || isNaN(audio.duration)) return
       const progress = audio.currentTime / audio.duration
-      // Exact timings (from the transcription done at story creation) when
-      // the scene has them, otherwise the length based estimate.
-      let w
-      if (exactTimes) {
-        w = 0
-        const t = audio.currentTime + 0.05
-        while (w + 1 < exactTimes.length && exactTimes[w + 1] <= t) w++
-      } else {
-        w = wordIndexAt(wordTimings.ends, progress)
-      }
-      if (w !== lastWord) { lastWord = w; setActiveWord(w) }
       cueState.forEach(cue => {
         if (!cue.fired && progress >= cue.fraction) {
           cue.fired = true
