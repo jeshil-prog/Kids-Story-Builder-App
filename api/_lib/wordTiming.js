@@ -6,8 +6,6 @@
 // ground truth, so this measures the real silences in the audio and pins the
 // first word after each pause to the moment the voice actually resumes.
 
-import { MPEGDecoder } from 'mpg123-decoder'
-
 const MIN_PAUSE = 0.16 // seconds of quiet that counts as a pause
 
 // Decodes an mp3 buffer and returns the pauses [{start, end}] plus where the
@@ -15,6 +13,9 @@ const MIN_PAUSE = 0.16 // seconds of quiet that counts as a pause
 export async function findPauses(mp3Buffer) {
   let decoder
   try {
+    // Loaded only when needed, and safely: if this library is ever missing,
+    // pause detection is skipped rather than breaking story creation.
+    const { MPEGDecoder } = await import('mpg123-decoder')
     decoder = new MPEGDecoder()
     await decoder.ready
     const { channelData, sampleRate } = decoder.decode(new Uint8Array(mp3Buffer))
