@@ -28,7 +28,18 @@ function wordIndexAt(ends, progress) {
   return ends.length - 1
 }
 
-function NarrationText({ text, learning, activeIndex }) {
+// Picks the largest text size that fits a box without scrolling. Used by the
+// phone full screen layout, where there is no room for the text to scroll.
+function fitFontSize(len, w, h) {
+  for (let fs = 22; fs >= 11; fs--) {
+    const perLine = Math.max(8, Math.floor(w / (fs * 0.52)))
+    const lines = Math.floor(h / (fs * 1.55))
+    if (len <= perLine * lines * 0.85) return fs
+  }
+  return 11
+}
+
+function NarrationText({ text, learning, activeIndex, dark }) {
   if (!learning || activeIndex < 0) return <>{text}</>
   const words = (text || '').trim().split(/\s+/).filter(Boolean)
   return (
@@ -41,7 +52,9 @@ function NarrationText({ text, learning, activeIndex }) {
             margin: '0 -3px',
             transition: 'background 0.12s, color 0.12s',
             background: i === activeIndex ? '#ffd24d' : 'transparent',
-            color: i === activeIndex ? '#2e1a08' : (i < activeIndex ? 'rgba(46,26,8,0.55)' : '#2e1a08'),
+            color: i === activeIndex ? '#2e1a08' : (dark
+              ? (i < activeIndex ? 'rgba(255,255,255,0.5)' : '#ffffff')
+              : (i < activeIndex ? 'rgba(46,26,8,0.55)' : '#2e1a08')),
             fontWeight: i === activeIndex ? 700 : 'inherit',
             boxShadow: i === activeIndex ? '0 1px 0 rgba(120,80,0,0.35)' : 'none',
           }}>{w}</span>
@@ -152,6 +165,64 @@ export default function StoryPlayer() {
     try { return localStorage.getItem('sd_reading_mode') !== 'regular' } catch { return true }
   })
   const [activeWord, setActiveWord] = useState(-1)
+
+  // Phone full screen ("cinema") mode, like YouTube's landscape full screen.
+  // Where the phone's browser allows it (Android Chrome), this hides the
+  // address and tab bars and turns the screen sideways. iPhone Safari does
+  // not let any web page hide its bars or lock rotation, so there it still
+  // gives the full screen layout once the phone is turned sideways.
+  const [cinema, setCinema] = useState(false)
+  const enterCinema = useCallback(async () => {
+    setCinema(true)
+    try {
+      const el = document.documentElement
+      if (el.requestFullscreen) await el.requestFullscreen({ navigationUI: 'hide' })
+      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen()
+    } catch {}
+    try { await window.screen?.orientation?.lock?.('landscape') } catch {}
+  }, [])
+  const exitCinema = useCallback(() => {
+    setCinema(false)
+    try { window.screen?.orientation?.unlock?.() } catch {}
+    try { if (document.fullscreenElement) document.exitFullscreen() } catch {}
+  }, [])
+  // iPhone Safari has no full screen for web pages, but it does tuck its bar
+  // away when the page is scrolled up. So where the real Fullscreen API is
+  // missing, make the page scrollable behind the full screen layout (a tall
+  // invisible spacer) so a swipe up collapses the bar, and say so once.
+  const [barHint, setBarHint] = useState(false)
+  useEffect(() => {
+    const needsSwipeTrick = isTouchDevice && !document.documentElement.requestFullscreen
+    if (!cinema || !needsSwipeTrick) return
+    const spacer = document.createElement('div')
+    spacer.setAttribute('aria-hidden', 'true')
+    spacer.style.cssText = 'position:absolute;top:0;left:0;width:1px;height:300vh;pointer-events:none;'
+    document.body.appendChild(spacer)
+    setBarHint(true)
+    const t = setTimeout(() => setBarHint(false), 6000)
+    return () => {
+      clearTimeout(t)
+      setBarHint(false)
+      spacer.remove()
+      window.scrollTo(0, 0)
+    }
+  }, [cinema, isTouchDevice])
+
+  useEffect(() => {
+    // The phone's own back gesture or swipe can leave full screen; keep in step.
+    const onChange = () => {
+      if (!document.fullscreenElement) {
+        setCinema(false)
+        try { window.screen?.orientation?.unlock?.() } catch {}
+      }
+    }
+    document.addEventListener('fullscreenchange', onChange)
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange)
+      try { window.screen?.orientation?.unlock?.() } catch {}
+      try { if (document.fullscreenElement) document.exitFullscreen() } catch {}
+    }
+  }, [])
   const toggleReadingMode = () => {
     setLearningMode(prev => {
       const next = !prev
@@ -702,7 +773,7 @@ export default function StoryPlayer() {
     return <FinishingTouchesScreen title={story.title} onBack={() => navigate('/')} stuck={stuckSceneIndices.includes(0)} />
   }
 
-  if (isTouchDevice && landscape) {
+  if (isTouchDevice && landscape && !cinema) {
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, padding: 40, background: '#0d0b1a' }}>
         <div style={{ fontSize: 64 }}>📖</div>
@@ -727,6 +798,64 @@ export default function StoryPlayer() {
   const useOverlayControls = compact || projector
   const nextIsLastAndUnreachable = scene === scenes.length - 1
   const nextDisabled = nextIsLastAndUnreachable || waitingForNext
+
+  if (isTouchDevice && landscape && cinema) {
+    const vw = window.innerWidth
+    const vh = viewportH
+    const textW = Math.max(120, vw - vh - 56)
+    const textH = Math.max(80, vh - 120)
+    const fs = fitFontSize((current?.narration || '').length, textW, textH)
+    const imgSrc = current?.imageUrl || (current?.imageData ? `data:${current.imageType || 'image/png'};base64,${current.imageData}` : null)
+    const circle = { width: 38, height: 38, borderRadius: '50%', background: 'rgba(255,255,255,0.14)', border: '0.5px solid rgba(255,255,255,0.25)', color: 'white', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }
+    return (
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 9999, background: '#05040c', display: 'flex', overflow: 'hidden',
+        paddingLeft: 'env(safe-area-inset-left, 0px)', paddingRight: 'env(safe-area-inset-right, 0px)', boxSizing: 'border-box'
+      }}>
+        <style>{`
+          @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+          @keyframes spin { to { transform: rotate(360deg); } }
+        `}</style>
+        {imgSrc && <img src={imgSrc} alt="" aria-hidden="true" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', filter: 'blur(30px) brightness(0.4)', transform: 'scale(1.2)' }} />}
+        {barHint && (
+          <div style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 2, background: 'rgba(0,0,0,0.7)', color: 'white', fontSize: 12, padding: '6px 14px', borderRadius: 100, pointerEvents: 'none', whiteSpace: 'nowrap' }}>
+            Swipe up to hide the browser bar
+          </div>
+        )}
+        <div style={{ position: 'relative', height: '100%', aspectRatio: '1 / 1', flexShrink: 0, background: '#1a1830' }}>
+          {imgSrc && <img key={scene} src={imgSrc} alt={`Scene ${scene + 1}`} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', animation: 'fadeIn 0.6s ease' }} />}
+        </div>
+        <div style={{ position: 'relative', flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: '10px 18px 10px 20px', boxSizing: 'border-box' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            <p style={{ flex: 1, minWidth: 0, margin: 0, fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.65)', fontFamily: 'Georgia, serif', textTransform: 'uppercase', letterSpacing: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{current?.chapter}</p>
+            <button onClick={toggleReadingMode} style={{ background: learningMode ? 'rgba(255,210,77,0.18)' : 'rgba(255,255,255,0.1)', border: learningMode ? '0.5px solid rgba(255,210,77,0.55)' : '0.5px solid rgba(255,255,255,0.2)', borderRadius: 8, color: learningMode ? '#ffd24d' : 'rgba(255,255,255,0.75)', padding: '4px 9px', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>{learningMode ? '🔤 Learning' : '📖 Regular'}</button>
+            <button onClick={exitCinema} style={{ background: 'rgba(255,255,255,0.1)', border: '0.5px solid rgba(255,255,255,0.2)', borderRadius: 8, color: 'rgba(255,255,255,0.8)', padding: '4px 9px', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>✕ Exit</button>
+          </div>
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center' }}>
+            <p style={{ margin: 0, fontSize: fs, lineHeight: 1.55, color: '#fff', fontFamily: 'Georgia, serif', textShadow: '0 1px 3px rgba(0,0,0,0.5)' }}>
+              <NarrationText text={current?.narration} learning={learningMode} activeIndex={activeWord} dark />
+            </p>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, flexShrink: 0 }}>
+            <button onClick={goPrev} disabled={scene === 0} aria-label="Previous" style={{ ...circle, opacity: scene === 0 ? 0.4 : 1 }}>‹</button>
+            <button
+              onClick={() => speaking ? stopAudio() : playNarration()}
+              disabled={loadingAudio}
+              style={{ background: speaking ? '#3C3489' : '#534AB7', border: 'none', borderRadius: 100, color: 'white', padding: '9px 20px', fontSize: 13, fontWeight: 600, cursor: loadingAudio ? 'wait' : 'pointer', whiteSpace: 'nowrap', opacity: loadingAudio ? 0.7 : 1 }}
+            >
+              {loadingAudio ? '⏳' : speaking ? '⏸ Stop' : '▶ Read aloud'}
+            </button>
+            <button onClick={() => goNext()} disabled={nextDisabled} aria-label="Next" style={{ ...circle, opacity: nextIsLastAndUnreachable ? 0.4 : 1 }}>
+              {waitingForNext ? <span style={{ display: 'inline-block', width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.25)', borderTopColor: 'white', animation: 'spin 0.8s linear infinite' }} /> : '›'}
+            </button>
+          </div>
+          <div style={{ height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.12)', marginTop: 8, flexShrink: 0 }}>
+            <div style={{ height: '100%', width: `${progress}%`, background: '#7F77DD', borderRadius: 2, transition: 'width 0.4s' }} />
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div style={compact ? {
@@ -764,10 +893,16 @@ export default function StoryPlayer() {
           style={{ background: learningMode ? 'rgba(255,210,77,0.18)' : 'rgba(255,255,255,0.1)', border: learningMode ? '0.5px solid rgba(255,210,77,0.55)' : '0.5px solid rgba(255,255,255,0.15)', borderRadius: 8, color: learningMode ? '#ffd24d' : 'rgba(255,255,255,0.7)', padding: compact ? '4px 9px' : '6px 12px', fontSize: compact ? 12 : 13, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap' }}>
           {learningMode ? '🔤 Learning' : '📖 Regular'}
         </button>
-        <button onClick={() => { stopAudio(); toggleProjector() }} style={{ background: 'rgba(255,255,255,0.1)', border: '0.5px solid rgba(255,255,255,0.15)', borderRadius: 8, color: 'rgba(255,255,255,0.7)', padding: compact ? '4px 9px' : '6px 12px', fontSize: compact ? 12 : 13, cursor: 'pointer', flexShrink: 0 }}>
-          {projector ? '⊠ Exit' : '⊡ Fullscreen'}
+        <button onClick={() => { if (isTouchDevice) { cinema ? exitCinema() : enterCinema() } else { stopAudio(); toggleProjector() } }} style={{ background: 'rgba(255,255,255,0.1)', border: '0.5px solid rgba(255,255,255,0.15)', borderRadius: 8, color: 'rgba(255,255,255,0.7)', padding: compact ? '4px 9px' : '6px 12px', fontSize: compact ? 12 : 13, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap' }}>
+          {isTouchDevice ? (cinema ? '✕ Exit' : '⛶ Full screen') : (projector ? '⊠ Exit' : '⊡ Fullscreen')}
         </button>
       </div>
+
+      {compact && cinema && (
+        <div style={{ background: 'rgba(127,119,221,0.22)', color: 'rgba(255,255,255,0.85)', fontSize: 12, textAlign: 'center', padding: '5px 10px', flexShrink: 0 }}>
+          ↻ Turn your phone sideways for full screen
+        </div>
+      )}
 
       {/* Story progress bar */}
       <div style={{ height: 2, background: 'rgba(255,255,255,0.06)', flexShrink: 0 }}>
