@@ -30,13 +30,13 @@ function wordIndexAt(ends, progress) {
 
 // Picks the largest text size that fits a box without scrolling. Used by the
 // phone full screen layout, where there is no room for the text to scroll.
-function fitFontSize(len, w, h) {
-  for (let fs = 22; fs >= 11; fs--) {
+function fitFontSize(len, w, h, max = 22, min = 11) {
+  for (let fs = max; fs >= min; fs--) {
     const perLine = Math.max(8, Math.floor(w / (fs * 0.52)))
     const lines = Math.floor(h / (fs * 1.55))
     if (len <= perLine * lines * 0.85) return fs
   }
-  return 11
+  return min
 }
 
 function NarrationText({ text, learning, activeIndex, dark }) {
@@ -729,11 +729,11 @@ export default function StoryPlayer() {
       if (e.key === 'ArrowRight') goNext()
       if (e.key === 'ArrowLeft') goPrev()
       if (e.key === ' ') { e.preventDefault(); speaking ? stopAudio() : playNarration() }
-      if (e.key === 'Escape') setProjector(false)
+      if (e.key === 'Escape') exitCinema()
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [goNext, goPrev, speaking, stopAudio, playNarration])
+  }, [goNext, goPrev, speaking, stopAudio, playNarration, exitCinema])
 
   // Stop all audio on unmount
   useEffect(() => {
@@ -773,18 +773,6 @@ export default function StoryPlayer() {
     return <FinishingTouchesScreen title={story.title} onBack={() => navigate('/')} stuck={stuckSceneIndices.includes(0)} />
   }
 
-  if (isTouchDevice && landscape && !cinema) {
-    return (
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, padding: 40, background: '#0d0b1a' }}>
-        <div style={{ fontSize: 64 }}>📖</div>
-        <p style={{ fontSize: 20, fontWeight: 600, color: 'white', textAlign: 'center', margin: 0 }}>Rotate your device</p>
-        <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)', textAlign: 'center', maxWidth: 240, margin: 0, lineHeight: 1.6 }}>
-          Stories look best in portrait mode. Turn your phone upright to begin reading!
-        </p>
-      </div>
-    )
-  }
-
   const progress = ((scene + 1) / scenes.length) * 100
   const readyCount = scenes.filter(isSceneReady).length
 
@@ -799,346 +787,162 @@ export default function StoryPlayer() {
   const nextIsLastAndUnreachable = scene === scenes.length - 1
   const nextDisabled = nextIsLastAndUnreachable || waitingForNext
 
-  if (isTouchDevice && landscape && cinema) {
+  // ---- One design for every screen: dark, with the picture softly blurred
+  // behind. Wide screens (phone sideways, laptop, desktop) put the picture on
+  // the left and the story on the right. Upright screens stack them. Turning
+  // a phone sideways switches to the wide layout straight away.
+  const goToScene = (i) => {
+    const sc = scenes[i]
+    if (sc && (sc.imageUrl || sc.imageData)) { stopAudio(); setWaitingForNext(false); setScene(i) }
+  }
+  const imgSrc = current?.imageUrl || (current?.imageData ? `data:${current.imageType || 'image/png'};base64,${current.imageData}` : null)
+  const circleStyle = (size, disabled, dim) => ({
+    width: size, height: size, borderRadius: '50%', background: 'rgba(255,255,255,0.14)', border: '0.5px solid rgba(255,255,255,0.25)',
+    color: 'white', fontSize: Math.round(size * 0.5), display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+    cursor: disabled ? 'not-allowed' : 'pointer', opacity: dim ? 0.4 : 1, flexShrink: 0
+  })
+  const nextSpinner = <span style={{ display: 'inline-block', width: 16, height: 16, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.25)', borderTopColor: 'white', animation: 'spin 0.8s linear infinite' }} />
+  const buttonsRow = (onReadAloud, size = 44) => (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
+      <button onClick={goPrev} disabled={scene === 0} aria-label="Previous page" style={circleStyle(size, scene === 0, scene === 0)}>‹</button>
+      <button
+        onClick={onReadAloud}
+        disabled={loadingAudio}
+        style={{ background: speaking ? '#3C3489' : '#534AB7', border: 'none', borderRadius: 100, color: 'white', padding: `${Math.round(size * 0.27)}px ${Math.round(size * 0.55)}px`, fontSize: size >= 44 ? 15 : 14, fontWeight: 600, cursor: loadingAudio ? 'wait' : 'pointer', whiteSpace: 'nowrap', opacity: loadingAudio ? 0.7 : 1, minWidth: size >= 44 ? 150 : 130 }}
+      >
+        {loadingAudio ? '⏳' : speaking ? '⏸ Stop' : '▶ Read aloud'}
+      </button>
+      <button onClick={() => goNext()} disabled={nextDisabled} aria-label="Next page" style={circleStyle(size, nextDisabled, nextIsLastAndUnreachable)}>
+        {waitingForNext ? nextSpinner : '›'}
+      </button>
+    </div>
+  )
+  const dotsRow = (
+    <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+      {scenes.map((sc, i) => (
+        <div key={i} onClick={() => goToScene(i)} style={{
+          height: 6, borderRadius: 3, cursor: (sc.imageData || sc.imageUrl) ? 'pointer' : 'default', transition: 'all 0.2s',
+          width: i === scene ? 18 : 6,
+          background: i === scene ? '#7F77DD' : (sc.imageData || sc.imageUrl) ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.2)'
+        }} />
+      ))}
+    </div>
+  )
+  const statusLine = waitingForNext ? (
+    <p style={{ margin: 0, textAlign: 'center', fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>
+      {stuckSceneIndices.includes(scene + 1)
+        ? 'This next page is taking much longer than expected, sorry about this'
+        : 'Preparing the next page…'}
+    </p>
+  ) : null
+  const barHintPill = barHint && (
+    <div style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 3, background: 'rgba(0,0,0,0.75)', color: 'white', fontSize: 12, padding: '6px 14px', borderRadius: 100, pointerEvents: 'none', whiteSpace: 'nowrap' }}>
+      Swipe up to hide the browser bar
+    </div>
+  )
+  const backdrop = imgSrc ? (
+    <img src={imgSrc} alt="" aria-hidden="true" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', filter: 'blur(30px) brightness(0.4)', transform: 'scale(1.2)' }} />
+  ) : null
+  const pillButton = { background: 'rgba(255,255,255,0.1)', border: '0.5px solid rgba(255,255,255,0.2)', borderRadius: 8, color: 'rgba(255,255,255,0.8)', padding: '6px 11px', fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }
+  const learningPill = (
+    <button onClick={toggleReadingMode} aria-pressed={learningMode} title={learningMode ? 'Learning mode: words light up as they are read' : 'Regular mode: plain text'} style={{ ...pillButton, background: learningMode ? 'rgba(255,210,77,0.18)' : pillButton.background, border: learningMode ? '0.5px solid rgba(255,210,77,0.55)' : pillButton.border, color: learningMode ? '#ffd24d' : pillButton.color }}>
+      {learningMode ? '🔤 Learning' : '📖 Regular'}
+    </button>
+  )
+  const backButton = <button onClick={() => { stopAudio(); navigate(-1) }} style={pillButton}>← Back</button>
+  const fullScreenButton = (
+    <button onClick={cinema ? exitCinema : enterCinema} style={pillButton}>{cinema ? '✕ Exit' : '⛶ Full screen'}</button>
+  )
+  // Pressing Read aloud on a phone also goes full screen, like pressing play
+  // on a video. On a computer it just plays.
+  const onReadAloud = () => {
+    if (speaking) { stopAudio(); return }
+    if (isTouchDevice && !cinema) enterCinema()
+    playNarration()
+  }
+  const rootStyle = {
+    position: 'fixed', top: 0, left: 0, right: 0, height: `${viewportH}px`, zIndex: 9999,
+    background: '#05040c', overflow: 'hidden', display: 'flex', boxSizing: 'border-box',
+    paddingLeft: 'env(safe-area-inset-left, 0px)', paddingRight: 'env(safe-area-inset-right, 0px)',
+  }
+  const keyframes = (
+    <style>{`
+      @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes spin { to { transform: rotate(360deg); } }
+    `}</style>
+  )
+  const narrationLen = (current?.narration || '').length
+
+  // ---- Wide: picture left, story right ----
+  if (landscape) {
     const vw = window.innerWidth
-    const vh = viewportH
-    const textW = Math.max(120, vw - vh - 56)
-    const textH = Math.max(80, vh - 120)
-    const fs = fitFontSize((current?.narration || '').length, textW, textH)
-    const imgSrc = current?.imageUrl || (current?.imageData ? `data:${current.imageType || 'image/png'};base64,${current.imageData}` : null)
-    const circle = { width: 38, height: 38, borderRadius: '50%', background: 'rgba(255,255,255,0.14)', border: '0.5px solid rgba(255,255,255,0.25)', color: 'white', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }
+    const imgW = Math.min(viewportH, Math.round(vw * 0.56))
+    const padX = isTouchDevice ? 20 : 40
+    const textW = Math.max(120, vw - imgW - padX * 2)
+    const textH = Math.max(60, viewportH - 190)
+    const maxFs = isTouchDevice ? 22 : Math.max(22, Math.min(40, Math.round(viewportH / 20)))
+    const fs = fitFontSize(narrationLen, textW, textH, maxFs)
     return (
-      <div style={{
-        position: 'fixed', inset: 0, zIndex: 9999, background: '#05040c', display: 'flex', overflow: 'hidden',
-        paddingLeft: 'env(safe-area-inset-left, 0px)', paddingRight: 'env(safe-area-inset-right, 0px)', boxSizing: 'border-box'
-      }}>
-        <style>{`
-          @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-          @keyframes spin { to { transform: rotate(360deg); } }
-        `}</style>
-        {imgSrc && <img src={imgSrc} alt="" aria-hidden="true" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', filter: 'blur(30px) brightness(0.4)', transform: 'scale(1.2)' }} />}
-        {barHint && (
-          <div style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 2, background: 'rgba(0,0,0,0.7)', color: 'white', fontSize: 12, padding: '6px 14px', borderRadius: 100, pointerEvents: 'none', whiteSpace: 'nowrap' }}>
-            Swipe up to hide the browser bar
-          </div>
-        )}
-        <div style={{ position: 'relative', height: '100%', aspectRatio: '1 / 1', flexShrink: 0, background: '#1a1830' }}>
-          {imgSrc && <img key={scene} src={imgSrc} alt={`Scene ${scene + 1}`} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', animation: 'fadeIn 0.6s ease' }} />}
+      <div style={rootStyle}>
+        {keyframes}
+        {backdrop}
+        {barHintPill}
+        <div style={{ position: 'relative', width: imgW, height: '100%', flexShrink: 0, background: '#1a1830', overflow: 'hidden' }}>
+          {imgSrc && <img key={scene} src={imgSrc} alt={`Scene ${scene + 1}`} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', animation: 'fadeIn 0.6s ease', display: 'block' }} />}
         </div>
-        <div style={{ position: 'relative', flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: '10px 18px 10px 20px', boxSizing: 'border-box' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-            <p style={{ flex: 1, minWidth: 0, margin: 0, fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.65)', fontFamily: 'Georgia, serif', textTransform: 'uppercase', letterSpacing: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{current?.chapter}</p>
-            <button onClick={toggleReadingMode} style={{ background: learningMode ? 'rgba(255,210,77,0.18)' : 'rgba(255,255,255,0.1)', border: learningMode ? '0.5px solid rgba(255,210,77,0.55)' : '0.5px solid rgba(255,255,255,0.2)', borderRadius: 8, color: learningMode ? '#ffd24d' : 'rgba(255,255,255,0.75)', padding: '4px 9px', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>{learningMode ? '🔤 Learning' : '📖 Regular'}</button>
-            <button onClick={exitCinema} style={{ background: 'rgba(255,255,255,0.1)', border: '0.5px solid rgba(255,255,255,0.2)', borderRadius: 8, color: 'rgba(255,255,255,0.8)', padding: '4px 9px', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>✕ Exit</button>
+        <div style={{ position: 'relative', flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: `10px ${padX}px 10px ${padX}px`, boxSizing: 'border-box' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, minHeight: 36 }}>
+            {!cinema && backButton}
+            <div style={{ flex: 1 }} />
+            {learningPill}
+            {fullScreenButton}
           </div>
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center' }}>
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <p style={{ margin: '0 0 8px 0', fontSize: isTouchDevice ? 12 : 14, fontWeight: 700, color: 'rgba(255,255,255,0.65)', fontFamily: 'Georgia, serif', textTransform: 'uppercase', letterSpacing: 1 }}>{current?.chapter}</p>
             <p style={{ margin: 0, fontSize: fs, lineHeight: 1.55, color: '#fff', fontFamily: 'Georgia, serif', textShadow: '0 1px 3px rgba(0,0,0,0.5)' }}>
               <NarrationText text={current?.narration} learning={learningMode} activeIndex={activeWord} dark />
             </p>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, flexShrink: 0 }}>
-            <button onClick={goPrev} disabled={scene === 0} aria-label="Previous" style={{ ...circle, opacity: scene === 0 ? 0.4 : 1 }}>‹</button>
-            <button
-              onClick={() => speaking ? stopAudio() : playNarration()}
-              disabled={loadingAudio}
-              style={{ background: speaking ? '#3C3489' : '#534AB7', border: 'none', borderRadius: 100, color: 'white', padding: '9px 20px', fontSize: 13, fontWeight: 600, cursor: loadingAudio ? 'wait' : 'pointer', whiteSpace: 'nowrap', opacity: loadingAudio ? 0.7 : 1 }}
-            >
-              {loadingAudio ? '⏳' : speaking ? '⏸ Stop' : '▶ Read aloud'}
-            </button>
-            <button onClick={() => goNext()} disabled={nextDisabled} aria-label="Next" style={{ ...circle, opacity: nextIsLastAndUnreachable ? 0.4 : 1 }}>
-              {waitingForNext ? <span style={{ display: 'inline-block', width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.25)', borderTopColor: 'white', animation: 'spin 0.8s linear infinite' }} /> : '›'}
-            </button>
-          </div>
-          <div style={{ height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.12)', marginTop: 8, flexShrink: 0 }}>
-            <div style={{ height: '100%', width: `${progress}%`, background: '#7F77DD', borderRadius: 2, transition: 'width 0.4s' }} />
+          <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {buttonsRow(onReadAloud, isTouchDevice ? 40 : 52)}
+            {statusLine}
+            <div style={{ height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.12)' }}>
+              <div style={{ height: '100%', width: `${progress}%`, background: '#7F77DD', borderRadius: 2, transition: 'width 0.4s' }} />
+            </div>
           </div>
         </div>
       </div>
     )
   }
 
+  // ---- Upright: picture on top, story under it, controls at the bottom ----
+  const vw = window.innerWidth
+  const fsUp = fitFontSize(narrationLen, vw - 40, Math.round(viewportH * 0.3), 19, 13)
   return (
-    <div style={compact ? {
-      display: 'flex', flexDirection: 'column', background: '#0d0b1a',
-      minHeight: '100dvh',
-      paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-      paddingLeft: 'env(safe-area-inset-left, 0px)', paddingRight: 'env(safe-area-inset-right, 0px)',
-      boxSizing: 'border-box',
-    } : {
-      display: 'flex', flexDirection: 'column', background: '#0d0b1a',
-      height: `${viewportH}px`, maxHeight: `${viewportH}px`,
-      paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-      paddingLeft: 'env(safe-area-inset-left, 0px)', paddingRight: 'env(safe-area-inset-right, 0px)',
-      boxSizing: 'border-box',
-      ...(projector ? { position: 'fixed', inset: 0, zIndex: 9999 } : {})
-    }}>
-      {/* Top bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: compact ? '5px 10px' : '12px 16px', borderBottom: '0.5px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.3)', flexShrink: 0 }}>
-        <button onClick={() => { stopAudio(); navigate(-1) }} style={{ background: 'rgba(255,255,255,0.1)', border: '0.5px solid rgba(255,255,255,0.15)', borderRadius: 8, color: 'rgba(255,255,255,0.7)', padding: compact ? '4px 9px' : '6px 12px', fontSize: compact ? 12 : 13, cursor: 'pointer', flexShrink: 0 }}>
-            ← Back
-          </button>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontSize: compact ? 12 : 14, fontWeight: 600, color: 'rgba(255,255,255,0.9)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: 0 }}>{story.title}</p>
-          {!compact && (
-            <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', margin: 0 }}>
-              {story.genre} · {story.style}
-              {readyCount < scenes.length && ` · ${readyCount}/${scenes.length} illustrated`}
-            </p>
-          )}
-        </div>
-        <button
-          onClick={toggleReadingMode}
-          aria-pressed={learningMode}
-          title={learningMode ? 'Learning mode: words light up as they are read' : 'Regular mode: plain text'}
-          style={{ background: learningMode ? 'rgba(255,210,77,0.18)' : 'rgba(255,255,255,0.1)', border: learningMode ? '0.5px solid rgba(255,210,77,0.55)' : '0.5px solid rgba(255,255,255,0.15)', borderRadius: 8, color: learningMode ? '#ffd24d' : 'rgba(255,255,255,0.7)', padding: compact ? '4px 9px' : '6px 12px', fontSize: compact ? 12 : 13, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap' }}>
-          {learningMode ? '🔤 Learning' : '📖 Regular'}
-        </button>
-        <button onClick={() => { if (isTouchDevice) { cinema ? exitCinema() : enterCinema() } else { stopAudio(); toggleProjector() } }} style={{ background: 'rgba(255,255,255,0.1)', border: '0.5px solid rgba(255,255,255,0.15)', borderRadius: 8, color: 'rgba(255,255,255,0.7)', padding: compact ? '4px 9px' : '6px 12px', fontSize: compact ? 12 : 13, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap' }}>
-          {isTouchDevice ? (cinema ? '✕ Exit' : '⛶ Full screen') : (projector ? '⊠ Exit' : '⊡ Fullscreen')}
-        </button>
+    <div style={{ ...rootStyle, flexDirection: 'column', paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
+      {keyframes}
+      {backdrop}
+      {barHintPill}
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', flexShrink: 0, background: 'rgba(0,0,0,0.35)' }}>
+        {backButton}
+        <p style={{ flex: 1, minWidth: 0, margin: 0, fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.9)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{story.title}</p>
+        {learningPill}
+        {fullScreenButton}
       </div>
-
-      {compact && cinema && (
-        <div style={{ background: 'rgba(127,119,221,0.22)', color: 'rgba(255,255,255,0.85)', fontSize: 12, textAlign: 'center', padding: '5px 10px', flexShrink: 0 }}>
-          ↻ Turn your phone sideways for full screen
-        </div>
-      )}
-
-      {/* Story progress bar */}
-      <div style={{ height: 2, background: 'rgba(255,255,255,0.06)', flexShrink: 0 }}>
-        <div style={{ height: '100%', width: `${progress}%`, background: '#7F77DD', transition: 'width 0.4s' }} />
+      <div style={{ position: 'relative', flex: '1 1 0', minHeight: 120, background: '#1a1830', overflow: 'hidden' }}>
+        {imgSrc && <img key={scene} src={imgSrc} alt={`Scene ${scene + 1}`} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center 30%', animation: 'fadeIn 0.6s ease', display: 'block' }} />}
       </div>
-
-      {/* Scene */}
-      {compact ? (
-        // Mobile portrait: image on top, parchment text below, natural page
-        // height (no forced fixed height) — lets the page genuinely scroll
-        // if content ever runs long, which is what allows Safari's normal
-        // chrome-collapse behavior to work, instead of fighting a pinned
-        // fullscreen overlay that has nothing real to scroll.
-        <div style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ width: '100%', height: '58vh', position: 'relative', overflow: 'hidden', background: '#1a1830', flexShrink: 0 }}>
-            {(current?.imageUrl || current?.imageData) ? (
-              <img
-                key={`${scene}-${(current.imageUrl || current.imageData)?.slice(0,10)}`}
-                src={current.imageUrl || `data:${current.imageType || 'image/png'};base64,${current.imageData}`}
-                alt={`Scene ${scene + 1}`}
-                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center 30%', animation: 'fadeIn 0.6s ease', display: 'block' }}
-              />
-            ) : (
-              <div style={{ position: 'absolute', inset: 0, background: '#1a1830' }} />
-            )}
-
-            <div style={{
-              position: 'absolute', left: 0, right: 0, bottom: 0,
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
-              padding: '10px 10px 8px',
-              background: 'linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.35) 60%, transparent 100%)',
-            }}>
-              <div style={{ display: 'flex', gap: 5 }}>
-                {scenes.map((sc, i) => (
-                  <div key={i} onClick={() => { if (sc.imageUrl || sc.imageData) { stopAudio(); setWaitingForNext(false); setScene(i) } }} style={{
-                    height: 5, borderRadius: 3, cursor: (sc.imageData || sc.imageUrl) ? 'pointer' : 'default', transition: 'all 0.2s',
-                    width: i === scene ? 16 : 5,
-                    background: i === scene ? '#7F77DD' : (sc.imageData || sc.imageUrl) ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.2)'
-                  }} />
-                ))}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <button onClick={goPrev} disabled={scene === 0} aria-label="Previous" style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(255,255,255,0.12)', border: '0.5px solid rgba(255,255,255,0.2)', color: 'white', cursor: scene === 0 ? 'not-allowed' : 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: scene === 0 ? 0.4 : 1 }}>‹</button>
-                <button
-                  onClick={() => speaking ? stopAudio() : playNarration()}
-                  disabled={loadingAudio}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6, background: speaking ? '#3C3489' : '#534AB7', border: 'none', borderRadius: 100, color: 'white', cursor: loadingAudio ? 'wait' : 'pointer', padding: '8px 16px', fontSize: 12, fontWeight: 600, transition: 'all 0.2s', opacity: loadingAudio ? 0.7 : 1, whiteSpace: 'nowrap' }}
-                >
-                  {loadingAudio ? '⏳' : speaking ? '⏸ Stop' : '▶ Read aloud'}
-                </button>
-                <button onClick={() => goNext()} disabled={nextDisabled} aria-label="Next" style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(255,255,255,0.12)', border: '0.5px solid rgba(255,255,255,0.2)', color: 'white', cursor: nextDisabled ? 'not-allowed' : 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: nextIsLastAndUnreachable ? 0.4 : 1 }}>
-                  {waitingForNext ? <span style={{ display: 'inline-block', width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.25)', borderTopColor: 'white', animation: 'spin 0.8s linear infinite' }} /> : '›'}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Parchment text — torn edge now faces up, toward the image above */}
-          <div style={{
-            width: '100%',
-            background: 'linear-gradient(175deg, #f7ecd4 0%, #eedcb2 50%, #e8d49e 100%)',
-            padding: '16px 16px 24px',
-            boxSizing: 'border-box',
-            position: 'relative',
-            clipPath: 'polygon(0 100%, 0 3%, 1.5% 0, 3% 2%, 5% 0, 7% 3%, 10% 1%, 13% 3%, 16% 0, 20% 2%, 25% 0, 30% 3%, 35% 0, 40% 2%, 45% 0, 50% 3%, 55% 0, 60% 2%, 65% 0, 70% 3%, 75% 0, 80% 2%, 85% 0, 90% 3%, 93% 0, 96% 2%, 98.5% 0, 100% 3%, 100% 100%)',
-          }}>
-            <p style={{ fontSize: 11, fontWeight: 700, color: '#6b4423', fontFamily: 'Georgia, serif', textTransform: 'uppercase', letterSpacing: 1, margin: '0 0 8px 0', opacity: 0.8 }}>
-              {current?.chapter}
-            </p>
-            <p style={{ fontSize: 15, lineHeight: 1.65, color: '#2e1a08', fontFamily: 'Georgia, serif', margin: 0 }}>
-              <NarrationText text={current?.narration} learning={learningMode} activeIndex={activeWord} />
-            </p>
-          </div>
-        </div>
-      ) : (
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'stretch', justifyContent: 'center', overflow: 'hidden' }}>
-        <div style={{ width: '100%', maxWidth: projector ? '100%' : 900, height: '100%', background: 'rgba(255,255,255,0.04)', border: projector ? 'none' : '0.5px solid rgba(255,255,255,0.1)', borderRadius: projector ? 0 : 16, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-
-          {/* Scene: parchment scroll + image, side by side, fills 100% of available height */}
-          <div style={{ width: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'row', overflow: 'hidden', background: '#1a1830' }}>
-
-            {/* Left: parchment — scrolls internally if narration is long, so text is never clipped */}
-            <div style={{
-              width: projector ? '35%' : '40%',
-              flexShrink: 0,
-              background: 'linear-gradient(175deg, #f7ecd4 0%, #eedcb2 50%, #e8d49e 100%)',
-              display: 'flex', flexDirection: 'column',
-              padding: projector ? '28px 26px 24px 24px' : '18px 18px 16px 16px',
-              boxSizing: 'border-box',
-              position: 'relative',
-              zIndex: 2,
-              overflowY: 'auto',
-              WebkitOverflowScrolling: 'touch',
-              clipPath: 'polygon(0 0, 97% 0, 100% 1.5%, 98% 3%, 100% 5%, 97% 7%, 99% 10%, 97% 13%, 100% 16%, 98% 20%, 100% 25%, 97% 30%, 100% 35%, 98% 40%, 100% 45%, 97% 50%, 100% 55%, 98% 60%, 100% 65%, 97% 70%, 100% 75%, 98% 80%, 100% 85%, 97% 90%, 100% 93%, 98% 96%, 100% 98.5%, 97% 100%, 0 100%)',
-            }}>
-              {/* Chapter title */}
-              <p style={{
-                fontSize: projector ? 12 : 10,
-                fontWeight: 700,
-                color: '#6b4423',
-                fontFamily: 'Georgia, serif',
-                textTransform: 'uppercase',
-                letterSpacing: 1,
-                margin: '0 0 6px 0',
-                opacity: 0.8,
-                flexShrink: 0,
-              }}>
-                {current?.chapter}
-              </p>
-              {/* Narration — scrolls rather than clipping if it doesn't fit */}
-              <p style={{
-                fontSize: projector ? 15 : 13,
-                lineHeight: 1.65,
-                color: '#2e1a08',
-                fontFamily: 'Georgia, serif',
-                margin: 0,
-              }}>
-                <NarrationText text={current?.narration} learning={learningMode} activeIndex={activeWord} />
-              </p>
-            </div>
-
-            {/* Right: full illustration, always fills height, hosts overlay controls in fullscreen */}
-            <div style={{ flex: 1, position: 'relative', marginLeft: -2, minHeight: 280, overflow: 'hidden' }}>
-              {(current?.imageUrl || current?.imageData) ? (
-                <img
-                  key={`${scene}-${(current.imageUrl || current.imageData)?.slice(0,10)}`}
-                  src={current.imageUrl || `data:${current.imageType || 'image/png'};base64,${current.imageData}`}
-                  alt={`Scene ${scene + 1}`}
-                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center 30%', animation: 'fadeIn 0.6s ease', display: 'block' }}
-                />
-              ) : (
-                // Should be effectively unreachable — gating in goNext/the
-                // auto-advance effect means we only ever move to a scene once
-                // its image exists. Kept minimal (no cheerful placeholder
-                // text/emoji) purely as a silent safety net.
-                <div style={{ position: 'absolute', inset: 0, background: '#1a1830' }} />
-              )}
-
-              {/* Overlay controls — used in fullscreen so the panel above
-                  never has to share space with a separate controls row */}
-              {projector && (
-                <div style={{
-                  position: 'absolute', left: 0, right: 0, bottom: 0,
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
-                  padding: '18px 20px 16px',
-                  background: 'linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.35) 60%, transparent 100%)',
-                }}>
-                  <div style={{ display: 'flex', gap: 5 }}>
-                    {scenes.map((sc, i) => (
-                      <div key={i} onClick={() => { if (sc.imageUrl || sc.imageData) { stopAudio(); setWaitingForNext(false); setScene(i) } }} style={{
-                        height: 5, borderRadius: 3, cursor: (sc.imageData || sc.imageUrl) ? 'pointer' : 'default', transition: 'all 0.2s',
-                        width: i === scene ? 16 : 5,
-                        background: i === scene ? '#7F77DD' : (sc.imageData || sc.imageUrl) ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.2)'
-                      }} />
-                    ))}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <button onClick={goPrev} disabled={scene === 0} aria-label="Previous" style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(255,255,255,0.12)', border: '0.5px solid rgba(255,255,255,0.2)', color: 'white', cursor: scene === 0 ? 'not-allowed' : 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: scene === 0 ? 0.4 : 1 }}>‹</button>
-
-                    <button
-                      onClick={() => speaking ? stopAudio() : playNarration()}
-                      disabled={loadingAudio}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 6,
-                        background: speaking ? '#3C3489' : '#534AB7',
-                        border: 'none', borderRadius: 100,
-                        color: 'white', cursor: loadingAudio ? 'wait' : 'pointer',
-                        padding: '10px 20px', fontSize: 14, fontWeight: 600,
-                        transition: 'all 0.2s', opacity: loadingAudio ? 0.7 : 1, whiteSpace: 'nowrap'
-                      }}
-                    >
-                      {loadingAudio ? '⏳' : speaking ? '⏸ Stop' : '▶ Read aloud'}
-                    </button>
-
-                    <button onClick={() => goNext()} disabled={nextDisabled} aria-label="Next" style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(255,255,255,0.12)', border: '0.5px solid rgba(255,255,255,0.2)', color: 'white', cursor: nextDisabled ? 'not-allowed' : 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: nextIsLastAndUnreachable ? 0.4 : 1 }}>
-                      {waitingForNext ? <span style={{ display: 'inline-block', width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.25)', borderTopColor: 'white', animation: 'spin 0.8s linear infinite' }} /> : '›'}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Below-panel controls — only when there's room to spare (desktop / tall windowed view) */}
-          {!useOverlayControls && (
-            <>
-              <div style={{ display: 'flex', gap: 6, justifyContent: 'center', padding: '12px 20px', flexShrink: 0 }}>
-                {scenes.map((sc, i) => (
-                  <div key={i} onClick={() => { if (sc.imageUrl || sc.imageData) { stopAudio(); setWaitingForNext(false); setScene(i) } }} style={{
-                    height: 6, borderRadius: 3, cursor: (sc.imageData || sc.imageUrl) ? 'pointer' : 'default', transition: 'all 0.2s',
-                    width: i === scene ? 20 : 6,
-                    background: i === scene ? '#7F77DD' : (sc.imageData || sc.imageUrl) ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.15)'
-                  }} />
-                ))}
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 20px 20px', justifyContent: 'center', flexShrink: 0 }}>
-                <button onClick={goPrev} disabled={scene === 0} aria-label="Previous" style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.7)', cursor: scene === 0 ? 'not-allowed' : 'pointer', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: scene === 0 ? 0.4 : 1 }}>‹</button>
-
-                <button
-                  onClick={() => speaking ? stopAudio() : playNarration()}
-                  disabled={loadingAudio}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    background: speaking ? '#3C3489' : '#534AB7',
-                    border: 'none', borderRadius: 100,
-                    color: 'white', cursor: loadingAudio ? 'wait' : 'pointer',
-                    padding: '12px 24px', fontSize: 14, fontWeight: 600,
-                    transition: 'all 0.2s', opacity: loadingAudio ? 0.7 : 1
-                  }}
-                >
-                  {loadingAudio ? '⏳ Loading…' : speaking ? '⏸ Stop' : '▶ Read aloud'}
-                </button>
-
-                <button onClick={() => goNext()} disabled={nextDisabled} aria-label="Next" style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.7)', cursor: nextDisabled ? 'not-allowed' : 'pointer', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: nextIsLastAndUnreachable ? 0.4 : 1 }}>
-                  {waitingForNext ? <span style={{ display: 'inline-block', width: 16, height: 16, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.2)', borderTopColor: 'rgba(255,255,255,0.8)', animation: 'spin 0.8s linear infinite' }} /> : '›'}
-                </button>
-              </div>
-
-              <p style={{ textAlign: 'center', fontSize: 11, color: 'rgba(255,255,255,0.3)', paddingBottom: 16, flexShrink: 0 }}>
-                {waitingForNext
-                  ? (stuckSceneIndices.includes(scene + 1)
-                      ? "This next page is taking much longer than expected — sorry about this"
-                      : 'Preparing the next page…')
-                  : `${scene + 1} of ${scenes.length} · Space to play · ← → to navigate`}
-              </p>
-            </>
-          )}
-        </div>
+      <div style={{ position: 'relative', flexShrink: 0, padding: '14px 20px 10px', background: 'rgba(0,0,0,0.38)' }}>
+        <p style={{ margin: '0 0 6px 0', fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.65)', fontFamily: 'Georgia, serif', textTransform: 'uppercase', letterSpacing: 1 }}>{current?.chapter}</p>
+        <p style={{ margin: 0, fontSize: fsUp, lineHeight: 1.55, color: '#fff', fontFamily: 'Georgia, serif', textShadow: '0 1px 3px rgba(0,0,0,0.5)' }}>
+          <NarrationText text={current?.narration} learning={learningMode} activeIndex={activeWord} dark />
+        </p>
       </div>
-      )}
-
-      <style>{`
-        @keyframes fadeIn { from { opacity: 0; transform: scale(1.02); } to { opacity: 1; transform: scale(1); } }
-        @keyframes spin { to { transform: rotate(360deg); } }
-      `}</style>
+      <div style={{ position: 'relative', flexShrink: 0, padding: '8px 10px 12px', display: 'flex', flexDirection: 'column', gap: 10, background: 'rgba(0,0,0,0.38)' }}>
+        {dotsRow}
+        {buttonsRow(onReadAloud, 44)}
+        {statusLine}
+      </div>
     </div>
   )
 }
