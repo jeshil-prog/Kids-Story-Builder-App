@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import React, { useState, useEffect, useRef } from 'react'
+import { useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { useStore } from '../lib/store'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../lib/AuthContext'
@@ -25,6 +25,10 @@ const LENGTHS = [
 // Must match TIER_LIMITS in api/generate-story.js (which is what actually
 // enforces the limit). This copy only decides what to SHOW the person.
 const TIER_LIMITS = { free: 3, tier1: 25, tier2: 200 }
+
+// Must match TIER_CHARACTER_LIMITS in Characters.jsx. Only decides what to show.
+const CHARACTER_LIMITS = { free: 2, tier1: 6, tier2: Infinity }
+const TIER_NAMES = { free: 'Free', tier1: 'Tier 1', tier2: 'Tier 2' }
 
 const GEN_STEPS = [
   'Writing your story',
@@ -66,6 +70,29 @@ export default function Create() {
       .eq('owner_id', user.id).gte('created_at', startOfMonth.toISOString())
       .then(({ count, error: countErr }) => { if (!countErr && typeof count === 'number') setUsedThisMonth(count) })
   }, [user.id])
+
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [showCharUpgrade, setShowCharUpgrade] = useState(false)
+  const autoselectDone = useRef(false)
+
+  // After adding a character on the Characters page, come back here with that
+  // new character already ticked, so there's nothing extra to do.
+  useEffect(() => {
+    if (autoselectDone.current || searchParams.get('autoselect') !== 'new') return
+    const newest = characters.find(c => c.ownerId === user.id)
+    if (!newest) return
+    autoselectDone.current = true
+    setSelectedChars(s => s.includes(newest.id) ? s : [...s, newest.id])
+    setSearchParams({}, { replace: true })
+  }, [characters, searchParams, user.id, setSearchParams])
+
+  const characterLimit = CHARACTER_LIMITS[tier] ?? CHARACTER_LIMITS.free
+  const ownCharacterCount = characters.filter(c => c.ownerId === user.id).length
+  const atCharLimit = ownCharacterCount >= characterLimit
+  const onNewCharacter = () => {
+    if (atCharLimit) setShowCharUpgrade(true)
+    else navigate('/characters?new=1')
+  }
 
   const storyLimit = TIER_LIMITS[tier] ?? TIER_LIMITS.free
   const atLimit = usedThisMonth !== null && usedThisMonth >= storyLimit
@@ -314,7 +341,7 @@ export default function Create() {
         {characters.length === 0 ? (
           <div style={{ padding: '20px', background: 'var(--surface-card)', border: '0.5px dashed var(--border-strong)', borderRadius: 14, textAlign: 'center' }}>
             <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10 }}>You haven't added any characters yet.</p>
-            <button onClick={() => navigate('/characters')} style={{ fontSize: 13, color: '#534AB7', background: 'none', border: 'none', cursor: 'pointer' }}>+ Add characters →</button>
+            <button onClick={() => navigate('/characters?new=1')} style={{ fontSize: 13, color: '#534AB7', background: 'none', border: 'none', cursor: 'pointer' }}>+ Add characters →</button>
           </div>
         ) : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
@@ -337,6 +364,37 @@ export default function Create() {
                 </div>
               )
             })}
+            {/* Always offered. At the plan's character limit, it explains how to get more instead. */}
+            <div
+              onClick={onNewCharacter}
+              role="button"
+              style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8,
+                padding: '12px 16px', borderRadius: 14, cursor: 'pointer', minWidth: 80,
+                border: `1px dashed ${showCharUpgrade ? '#534AB7' : 'var(--border-strong)'}`,
+                background: 'transparent'
+              }}
+            >
+              <div style={{ width: 44, height: 44, borderRadius: '50%', border: '1px dashed var(--border-strong)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, color: '#534AB7' }}>+</div>
+              <span style={{ fontSize: 12, color: '#534AB7', fontWeight: 600 }}>New character</span>
+            </div>
+          </div>
+        )}
+        {atCharLimit && showCharUpgrade && (
+          <div style={{ marginTop: 14, background: '#EEEDFE', border: '1px solid #C9C5F4', borderRadius: 14, padding: '14px 16px' }}>
+            <p style={{ fontSize: 14, fontWeight: 600, color: '#3C3489', margin: '0 0 4px 0' }}>
+              Upgrade to add more characters
+            </p>
+            <p style={{ fontSize: 13, color: '#4B4590', margin: '0 0 10px 0', lineHeight: 1.5 }}>
+              You've used all {characterLimit} characters on the {TIER_NAMES[tier]} plan.
+              {tier === 'free' ? ' Tier 1 lets you have 6, and Tier 2 has no limit.' : ' Tier 2 has no limit.'}
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <Link to="/profile" style={{ display: 'inline-block', background: '#534AB7', color: 'white', fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 100, textDecoration: 'none' }}>
+                View plans
+              </Link>
+              <button onClick={() => setShowCharUpgrade(false)} style={{ background: 'none', border: 'none', color: '#4B4590', fontSize: 13, cursor: 'pointer' }}>Not now</button>
+            </div>
           </div>
         )}
       </section>

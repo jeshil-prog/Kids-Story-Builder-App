@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { useStore } from '../lib/store'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../lib/AuthContext'
@@ -261,18 +261,27 @@ export default function Characters() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const { characters, addCharacter, updateCharacter, deleteCharacter } = useStore()
-  const [adding, setAdding] = useState(false)
+  const [searchParams] = useSearchParams()
+  // Coming from the Create page's "New character" button opens the form straight away.
+  const [adding, setAdding] = useState(() => searchParams.get('new') === '1')
   const [editing, setEditing] = useState(null)
   const [tier, setTier] = useState('free')
+  const [tierLoaded, setTierLoaded] = useState(false)
 
   useEffect(() => {
     supabase.from('subscriptions').select('tier, status').eq('user_id', user.id).single()
-      .then(({ data }) => setTier(data?.status === 'active' ? (data.tier || 'free') : 'free'))
+      .then(({ data }) => { setTier(data?.status === 'active' ? (data.tier || 'free') : 'free'); setTierLoaded(true) })
   }, [user.id])
 
   const ownCharacters = characters.filter(c => c.ownerId === user.id)
   const limit = TIER_CHARACTER_LIMITS[tier] ?? TIER_CHARACTER_LIMITS.free
   const atLimit = ownCharacters.length >= limit
+
+  // If the form was opened from a link but this plan is already full, close it
+  // (the limit notice in the header takes over).
+  useEffect(() => {
+    if (tierLoaded && atLimit && adding) setAdding(false)
+  }, [tierLoaded, atLimit, adding])
 
   return (
     <div style={{ padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 20, overflowY: 'auto', flex: 1 }}>
