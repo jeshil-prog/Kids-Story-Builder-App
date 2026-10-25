@@ -10,6 +10,18 @@ const TIER_INFO = {
   tier2: { name: 'Tier 2', storyLimit: 200, characterLimit: Infinity, price: '$39.99/mo' }
 }
 
+// What each plan includes, shown side by side so people can see the
+// difference before choosing. These must match what the app really enforces:
+// story and character limits (generate-story.js, Characters.jsx), art styles
+// (Create.jsx: free gets the first two) and friend sharing (Friends.jsx).
+const COMPARE_ROWS = [
+  { label: 'Price', free: 'Free', tier1: '$19.99/mo', tier2: '$39.99/mo' },
+  { label: 'Stories each month', free: '3', tier1: '25', tier2: 'Up to ~200' },
+  { label: 'Characters', free: '2', tier1: '6', tier2: 'Unlimited' },
+  { label: 'Art styles', free: '2', tier1: 'All 6', tier2: 'All 6' },
+  { label: 'Share with friends', free: '✕', tier1: '✓', tier2: '✓' },
+]
+
 export default function Profile() {
   const { user, logout } = useAuth()
   const { stories, characters } = useStore()
@@ -92,7 +104,7 @@ export default function Profile() {
   }
 
   return (
-    <div style={{ flex: 1, padding: 20, maxWidth: 480, margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
+    <div style={{ flex: 1, padding: 20, maxWidth: 520, margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
       <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)', margin: '8px 0 4px' }}>Profile & Billing</h1>
       <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 20px' }}>{user.email}</p>
 
@@ -142,13 +154,45 @@ export default function Profile() {
             </div>
           </div>
 
+          {/* Side by side comparison, so the difference between plans is clear */}
+          <div style={{ padding: '14px 12px 6px', borderRadius: 12, background: 'var(--surface-card)', marginBottom: 16 }}>
+            <p style={{ fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-muted)', margin: '0 4px 10px' }}>Compare plans</p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr 1fr 1fr', alignItems: 'stretch', fontSize: 13 }}>
+              <div />
+              {['free', 'tier1', 'tier2'].map(t => (
+                <div key={t} style={{ textAlign: 'center', padding: '8px 4px', borderRadius: '10px 10px 0 0', fontWeight: 700, color: t === tier ? '#3C3489' : 'var(--text-primary)', background: t === tier ? '#EEEDFE' : 'transparent' }}>
+                  {TIER_INFO[t].name}
+                  {t === tier && <div style={{ fontSize: 10, fontWeight: 600, color: '#534AB7', marginTop: 2 }}>Your plan</div>}
+                </div>
+              ))}
+              {COMPARE_ROWS.map((row, ri) => (
+                <React.Fragment key={row.label}>
+                  <div style={{ padding: '11px 4px', color: 'var(--text-muted)', borderTop: '0.5px solid var(--border)' }}>{row.label}</div>
+                  {['free', 'tier1', 'tier2'].map(t => (
+                    <div key={t} style={{
+                      padding: '11px 4px', textAlign: 'center', borderTop: '0.5px solid var(--border)',
+                      color: row[t] === '✕' ? 'var(--text-muted)' : 'var(--text-primary)', fontWeight: 500,
+                      background: t === tier ? '#EEEDFE' : 'transparent',
+                      borderRadius: t === tier && ri === COMPARE_ROWS.length - 1 ? '0 0 10px 10px' : 0
+                    }}>{row[t]}</div>
+                  ))}
+                </React.Fragment>
+              ))}
+            </div>
+            <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '10px 4px 8px', lineHeight: 1.5 }}>
+              All plans include narration, sound effects and all story lengths. Tier 1 is about one story a night. Tier 2 is for families who read several a night.
+            </p>
+          </div>
+
           {tier === 'free' ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <button onClick={() => handleUpgrade('tier1')} disabled={actionLoading} style={{ padding: '12px 14px', borderRadius: 10, fontSize: 14, fontWeight: 600, background: '#534AB7', color: 'white', border: 'none', cursor: 'pointer' }}>
                 Upgrade to Tier 1 — $19.99/mo
+                <span style={{ display: 'block', fontSize: 12, fontWeight: 400, opacity: 0.85, marginTop: 2 }}>25 stories a month, 6 characters, all art styles, friend sharing</span>
               </button>
               <button onClick={() => handleUpgrade('tier2')} disabled={actionLoading} style={{ padding: '12px 14px', borderRadius: 10, fontSize: 14, fontWeight: 600, background: 'var(--surface-card)', color: 'var(--text-primary)', border: '0.5px solid var(--border)', cursor: 'pointer' }}>
                 Upgrade to Tier 2 — $39.99/mo
+                <span style={{ display: 'block', fontSize: 12, fontWeight: 400, color: 'var(--text-muted)', marginTop: 2 }}>Up to ~200 stories a month, unlimited characters, everything in Tier 1</span>
               </button>
             </div>
           ) : (
