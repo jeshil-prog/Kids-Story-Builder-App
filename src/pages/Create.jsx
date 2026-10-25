@@ -22,6 +22,10 @@ const LENGTHS = [
   { id: 'chapter', label: 'Chapter book', desc: '10 scenes · ~20 min' },
 ]
 
+// Must match TIER_LIMITS in api/generate-story.js (which is what actually
+// enforces the limit). This copy only decides what to SHOW the person.
+const TIER_LIMITS = { free: 3, tier1: 25, tier2: 200 }
+
 const GEN_STEPS = [
   'Writing your story',
   'Splitting into scenes',
@@ -43,11 +47,34 @@ export default function Create() {
   const [error, setError] = useState(null)
   const [limitReached, setLimitReached] = useState(false)
   const [tier, setTier] = useState('free')
+  // How many stories this person has made this month. null while loading,
+  // or if it couldn't be checked (then nothing is blocked up front, and the
+  // server still enforces the limit as the final safety net).
+  const [usedThisMonth, setUsedThisMonth] = useState(null)
 
   useEffect(() => {
     supabase.from('subscriptions').select('tier, status').eq('user_id', user.id).single()
       .then(({ data }) => setTier(data?.status === 'active' ? (data.tier || 'free') : 'free'))
   }, [user.id])
+
+  // Counted the same way the server counts: this person's stories created
+  // since the start of the current month (UTC, like the server).
+  useEffect(() => {
+    const now = new Date()
+    const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+    supabase.from('stories').select('id', { count: 'exact', head: true })
+      .eq('owner_id', user.id).gte('created_at', startOfMonth.toISOString())
+      .then(({ count, error: countErr }) => { if (!countErr && typeof count === 'number') setUsedThisMonth(count) })
+  }, [user.id])
+
+  const storyLimit = TIER_LIMITS[tier] ?? TIER_LIMITS.free
+  const atLimit = usedThisMonth !== null && usedThisMonth >= storyLimit
+  const storiesLeft = usedThisMonth === null ? null : Math.max(0, storyLimit - usedThisMonth)
+  const resetLabel = (() => {
+    const now = new Date()
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1))
+      .toLocaleDateString('en-AU', { day: 'numeric', month: 'long', timeZone: 'UTC' })
+  })()
 
   // Free tier only gets the first two styles — the rest are visible but
   // locked, with an upgrade prompt, rather than hidden entirely.
@@ -56,7 +83,7 @@ export default function Create() {
 
   const toggleChar = (id) => setSelectedChars(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id])
   const chosenChars = characters.filter(c => selectedChars.includes(c.id))
-  const canGenerate = chosenChars.length > 0 && prompt.trim().length > 5
+  const canGenerate = chosenChars.length > 0 && prompt.trim().length > 5 && !atLimit
 
   const generate = async () => {
     setGenerating(true)
@@ -85,8 +112,11 @@ export default function Create() {
       if (!storyRes.ok) {
         const errBody = await storyRes.json().catch(() => ({}))
         if (errBody.limitReached) {
-          setLimitReached(true)
-          setError(errBody.error)
+          // The count shown on the form was out of date (for example, a story
+          // was made on another device). Go back to the form, which now shows
+          // the limit notice, instead of leaving a half-finished loading screen.
+          setUsedThisMonth(prev => Math.max(prev ?? 0, storyLimit))
+          setGenerating(false)
           return
         }
         throw new Error(errBody.error || 'Story generation failed. Check your API keys.')
@@ -257,6 +287,24 @@ export default function Create() {
 
   return (
     <div style={{ overflowY: 'auto', flex: 1, padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 28 }}>
+      {atLimit && (
+        <div style={{ background: '#FFF6E5', border: '1px solid #F2C879', borderRadius: 14, padding: '16px 18px' }}>
+          <p style={{ fontSize: 15, fontWeight: 600, color: '#5A3A00', margin: '0 0 6px 0' }}>
+            {tier === 'free'
+              ? `You've used all ${storyLimit} free stories this month`
+              : `You've used all ${storyLimit} stories in your plan this month`}
+          </p>
+          <p style={{ fontSize: 13, color: '#7A5400', margin: '0 0 10px 0', lineHeight: 1.5 }}>
+            Your stories reset on {resetLabel}.{tier !== 'tier2' && ' Upgrade to keep creating now.'}
+          </p>
+          {tier !== 'tier2' && (
+            <Link to="/profile" style={{ display: 'inline-block', background: '#534AB7', color: 'white', fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 100, textDecoration: 'none' }}>
+              View plans
+            </Link>
+          )}
+        </div>
+      )}
+
       {/* Step 1: Characters */}
       <section>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
@@ -401,12 +449,19 @@ export default function Create() {
         </div>
       </section>
 
+      {!atLimit && storiesLeft !== null && (tier === 'free' || storiesLeft <= 3) && (
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', margin: '0 0 -12px 0' }}>
+          {storiesLeft === 1
+            ? `Last story this month on your plan`
+            : `${storiesLeft} of ${storyLimit} stories left this month`}
+        </p>
+      )}
       <Button
         onClick={generate}
         disabled={!canGenerate}
         style={{ width: '100%', justifyContent: 'center', padding: '14px', fontSize: 15, borderRadius: 14, marginTop: 4 }}
       >
-        ✨ Generate story
+        {atLimit ? 'Monthly limit reached' : '✨ Generate story'}
       </Button>
     </div>
   )
