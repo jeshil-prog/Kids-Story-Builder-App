@@ -7,6 +7,7 @@ import StoryPlayer from './pages/StoryPlayer'
 import Library from './pages/Library'
 import Login from './pages/Login'
 import Welcome from './pages/Welcome'
+import ResetPassword from './pages/ResetPassword'
 import Friends from './pages/Friends'
 import Profile from './pages/Profile'
 import Privacy from './pages/Privacy'
@@ -73,7 +74,8 @@ function Nav() {
   const isLogin = loc.pathname === '/login'
   const isWelcome = loc.pathname === '/welcome'
   const isLegal = loc.pathname === '/privacy' || loc.pathname === '/terms'
-  if (isStory || isLogin || isWelcome || isLegal) return null
+  const isReset = loc.pathname === '/reset-password'
+  if (isStory || isLogin || isWelcome || isLegal || isReset) return null
 
   const tabs = [
     { to: '/', label: 'Home', icon: '🏠' },
@@ -181,6 +183,7 @@ function AppRoutes() {
       <Route path="/privacy" element={<Privacy />} />
       <Route path="/terms" element={<Terms />} />
       <Route path="/welcome" element={<RequireSession><Welcome /></RequireSession>} />
+      <Route path="/reset-password" element={<RequireSession><ResetPassword /></RequireSession>} />
       <Route path="/" element={<RequireAuth><Home /></RequireAuth>} />
       <Route path="/create" element={<RequireAuth><Create /></RequireAuth>} />
       <Route path="/characters" element={<RequireAuth><Characters /></RequireAuth>} />
