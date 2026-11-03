@@ -38,6 +38,11 @@ const storyFromRow = (row) => ({
   style: row.style,
   scenes: row.scenes || [],
   characters: row.characters || [],
+  language: row.language || 'en',
+  toBeContinued: !!row.to_be_continued,
+  chapterNumber: row.chapter_number || 1,
+  continuesStoryId: row.continues_story_id || null,
+  isShared: row.is_shared !== false,
   createdAt: row.created_at
 })
 
@@ -137,7 +142,11 @@ export const useStore = create((set, get) => ({
       genre: story.genre || null,
       style: story.style || null,
       scenes: story.scenes || [],
-      characters: story.characters || []
+      characters: story.characters || [],
+      language: story.language || 'en',
+      to_be_continued: !!story.toBeContinued,
+      chapter_number: story.chapterNumber || 1,
+      continues_story_id: story.continuesStoryId || null
     }
     const { data, error } = await supabase.from('stories').upsert(row).select().single()
     if (error) { console.error('Failed to save story:', error); throw error }

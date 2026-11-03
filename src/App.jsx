@@ -8,6 +8,8 @@ import Library from './pages/Library'
 import Login from './pages/Login'
 import Welcome from './pages/Welcome'
 import ResetPassword from './pages/ResetPassword'
+import FriendProfile from './pages/FriendProfile'
+import PrintBook from './pages/PrintBook'
 import Friends from './pages/Friends'
 import Profile from './pages/Profile'
 import Privacy from './pages/Privacy'
@@ -81,8 +83,6 @@ function Nav() {
     { to: '/', label: 'Home', icon: '🏠' },
     { to: '/create', label: 'Create', icon: '✨' },
     { to: '/characters', label: 'Characters', icon: '🧒' },
-    { to: '/friends', label: 'Friends', icon: '🤝' },
-    { to: '/library', label: 'Library', icon: '📚' },
     { to: '/profile', label: 'Profile', icon: '👤' },
   ]
 
@@ -190,6 +190,8 @@ function AppRoutes() {
       <Route path="/friends" element={<RequireAuth><Friends /></RequireAuth>} />
       <Route path="/profile" element={<RequireAuth><Profile /></RequireAuth>} />
       <Route path="/story/:id" element={<RequireAuth><StoryPlayer /></RequireAuth>} />
+      <Route path="/story/:id/print" element={<RequireAuth><PrintBook /></RequireAuth>} />
+      <Route path="/friend/:id" element={<RequireAuth><FriendProfile /></RequireAuth>} />
       <Route path="/library" element={<RequireAuth><Library /></RequireAuth>} />
     </Routes>
   )

@@ -1,20 +1,24 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useStore } from '../lib/store'
-import { buildSfxTimeline, stopAmbientSfx } from '../lib/sfx'
+import { useAuth } from '../lib/AuthContext'
+import { stopAmbientSfx } from '../lib/sfx'
+import { tokenize, wordGap, buildCueTimeline } from '../lib/words'
+import { CHAR_WIDTH } from '../lib/languages'
 
 // ---- Learning mode: word highlighting -------------------------------------
 // Narration audio is a single file with no per-word timestamps, so the active
 // word is estimated from playback progress. Each word is weighted by its
 // length (longer words take longer to say) plus a small pause after commas,
 // full stops and the like. Costs nothing extra and needs no pipeline change.
-function buildWordTimings(text) {
-  const words = (text || '').trim().split(/\s+/).filter(Boolean)
+function buildWordTimings(text, lang = 'en') {
+  const words = tokenize(text, lang)
   const weights = words.map(w => {
-    const letters = w.replace(/[^\p{L}\p{N}]/gu, '').length || 1
+    const letters = w.replace(/[^\p{L}\p{M}\p{N}]/gu, '').length || 1
     let wt = 2 + letters
-    if (/[.!?]["')\]]*$/.test(w)) wt += 5
-    else if (/[,;:\u2014\u2013]["')\]]*$/.test(w)) wt += 2.5
+    // Full stops, question marks and so on, including Chinese and Hindi ones.
+    if (/[.!?。！？।]["'’”)\]」』）]*$/.test(w)) wt += 5
+    else if (/[,;:\u2014\u2013，；：、]["'’”)\]」』）]*$/.test(w)) wt += 2.5
     return wt
   })
   const total = weights.reduce((a, b) => a + b, 0) || 1
@@ -30,38 +34,51 @@ function wordIndexAt(ends, progress) {
 
 // Picks the largest text size that fits a box without scrolling. Used by the
 // phone full screen layout, where there is no room for the text to scroll.
-function fitFontSize(len, w, h, max = 22, min = 11) {
+function fitFontSize(len, w, h, max = 22, min = 11, charW = 0.52) {
   for (let fs = max; fs >= min; fs--) {
-    const perLine = Math.max(8, Math.floor(w / (fs * 0.52)))
+    const perLine = Math.max(8, Math.floor(w / (fs * charW)))
     const lines = Math.floor(h / (fs * 1.55))
     if (len <= perLine * lines * 0.85) return fs
   }
   return min
 }
 
-function NarrationText({ text, learning, activeIndex, dark }) {
-  if (!learning || activeIndex < 0) return <>{text}</>
-  const words = (text || '').trim().split(/\s+/).filter(Boolean)
+// The word being read out is lifted, enlarged and lit up. It is scaled with a
+// transform rather than a bigger font size or bold type, so no other word ever
+// moves. A little extra space between words leaves room for the enlarged word.
+// The words are drawn the same way whether or not one is lit, so the text does
+// not shift when the highlight starts.
+function NarrationText({ text, learning, activeIndex, dark, lang = 'en' }) {
+  if (!learning) return <>{text}</>
+  const words = tokenize(text, lang)
+  const gap = wordGap(lang)
   return (
-    <>
-      {words.map((w, i) => (
-        <React.Fragment key={i}>
-          <span style={{
-            borderRadius: 6,
-            padding: '1px 3px',
-            margin: '0 -3px',
-            transition: 'background 0.12s, color 0.12s',
-            background: i === activeIndex ? '#ffd24d' : 'transparent',
-            color: i === activeIndex ? '#2e1a08' : (dark
-              ? (i < activeIndex ? 'rgba(255,255,255,0.5)' : '#ffffff')
-              : (i < activeIndex ? 'rgba(46,26,8,0.55)' : '#2e1a08')),
-            fontWeight: i === activeIndex ? 700 : 'inherit',
-            boxShadow: i === activeIndex ? '0 1px 0 rgba(120,80,0,0.35)' : 'none',
-          }}>{w}</span>
-          {i < words.length - 1 ? ' ' : ''}
-        </React.Fragment>
-      ))}
-    </>
+    <span style={lang === 'zh' ? { letterSpacing: '0.14em' } : { wordSpacing: '0.3em' }}>
+      {words.map((w, i) => {
+        const active = i === activeIndex
+        return (
+          <React.Fragment key={i}>
+            <span style={{
+              display: 'inline-block',
+              position: 'relative',
+              zIndex: active ? 1 : 0,
+              padding: '0 0.12em',
+              margin: '0 -0.12em',
+              borderRadius: '0.3em',
+              transition: 'background 0.12s, color 0.12s, transform 0.14s, box-shadow 0.14s',
+              transform: active ? 'scale(1.16) translateY(-0.05em)' : 'none',
+              background: active ? '#ffd24d' : 'transparent',
+              color: active ? '#1f1200' : (dark
+                ? (activeIndex >= 0 && i < activeIndex ? 'rgba(255,255,255,0.5)' : '#ffffff')
+                : (activeIndex >= 0 && i < activeIndex ? 'rgba(46,26,8,0.55)' : '#2e1a08')),
+              textShadow: active ? 'none' : undefined,
+              boxShadow: active ? '0 0 0 0.08em rgba(255,210,77,0.4), 0 0.16em 0.7em rgba(255,190,40,0.6)' : 'none',
+            }}>{w}</span>
+            {i < words.length - 1 ? gap : ''}
+          </React.Fragment>
+        )
+      })}
+    </span>
   )
 }
 
@@ -118,6 +135,7 @@ export default function StoryPlayer() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { getStory, saveStory } = useStore()
+  const { user } = useAuth()
   const [story, setStory] = useState(null)
   const [storyLoading, setStoryLoading] = useState(true)
   const [scene, setScene] = useState(0)
@@ -166,6 +184,17 @@ export default function StoryPlayer() {
   })
   const [activeWord, setActiveWord] = useState(-1)
 
+  // Clean screen: while the story is being read aloud the buttons fade away,
+  // and a tap on the screen brings them back (and a tap again hides them).
+  // They stay visible whenever nothing is playing. The small delay before they
+  // come back stops them flashing up between two pages that are read in a row.
+  const [controlsVisible, setControlsVisible] = useState(true)
+  const [revealTick, setRevealTick] = useState(0)
+  const lastMoveRef = useRef(0)
+  const reveal = useCallback(() => { setControlsVisible(true); setRevealTick(t => t + 1) }, [])
+  // The ending screen shown after the last page ("The End" or "To be continued").
+  const [showEnd, setShowEnd] = useState(false)
+
   // Phone full screen ("cinema") mode, like YouTube's landscape full screen.
   // Where the phone's browser allows it (Android Chrome), this hides the
   // address and tab bars and turns the screen sideways. iPhone Safari does
@@ -207,6 +236,15 @@ export default function StoryPlayer() {
       window.scrollTo(0, 0)
     }
   }, [cinema, isTouchDevice])
+
+  useEffect(() => {
+    if (speaking) {
+      const t = setTimeout(() => setControlsVisible(false), 3500)
+      return () => clearTimeout(t)
+    }
+    const t = setTimeout(() => setControlsVisible(true), 700)
+    return () => clearTimeout(t)
+  }, [speaking, revealTick])
 
   useEffect(() => {
     // The phone's own back gesture or swipe can leave full screen; keep in step.
@@ -307,6 +345,8 @@ export default function StoryPlayer() {
 
   useEffect(() => {
     if (!story?.scenes?.length) return
+    // Someone else's story is read only: it is never saved or regenerated from here.
+    if (story.ownerId && user && story.ownerId !== user.id) return
     const missing = story.scenes.some((s) => !s.imageUrl && !s.imageData)
     if (!missing || backfillRef.current) return
     backfillRef.current = true
@@ -341,7 +381,7 @@ export default function StoryPlayer() {
           body: JSON.stringify({
             imagePrompt: sceneData.imagePrompt, style: story.style,
             storyId: id, sceneIndex, characters: charPayload,
-            narrationText: sceneData.narration
+            narrationText: sceneData.narration, language: story.language || 'en'
           })
         })
       } catch (err) {
@@ -425,7 +465,7 @@ export default function StoryPlayer() {
     poll()
 
     return () => { cancelled = true }
-  }, [story?.id])
+  }, [story?.id, user?.id])
 
   // Generate and play sfx via ElevenLabs, with in-memory cache
   const playSfx = useCallback(async (sound) => {
@@ -491,6 +531,8 @@ export default function StoryPlayer() {
 
   const scenes = story?.scenes || []
   const current = scenes[scene]
+  const lang = story?.language || 'en'
+  const isOwner = !!story && (!story.ownerId || story.ownerId === user?.id)
 
   // continueReading=true means this advance came from narration finishing,
   // and should auto-play the new scene's narration too once it lands
@@ -504,7 +546,7 @@ export default function StoryPlayer() {
 
   const goNext = useCallback((continueReading = false) => {
     const nextIndex = scene + 1
-    if (nextIndex >= scenes.length) { stopAudio(); return }
+    if (nextIndex >= scenes.length) { stopAudio(); setShowEnd(true); return }
     const nextReady = isSceneReady(scenes[nextIndex])
     stopAudio()
     if (nextReady) {
@@ -586,8 +628,8 @@ export default function StoryPlayer() {
     // playback progress (currentTime/duration) rather than an estimated
     // words-per-second guess, so timing also tracks the real TTS speed
     // instead of an approximation.
-    const sfxTimeline = buildSfxTimeline(sceneData.narration, sceneData.sfxCues)
-    const totalWords = sceneData.narration.trim().split(/\s+/).length
+    const sfxTimeline = buildCueTimeline(sceneData.narration, sceneData.sfxCues, lang)
+    const totalWords = tokenize(sceneData.narration, lang).length || 1
     // Capped below 1.0 — a cue firing in the very last moment of narration
     // doesn't have time to finish before the scene transitions to the next
     // one, which was very likely why SFX sometimes sounded cut off when the
@@ -595,7 +637,7 @@ export default function StoryPlayer() {
     const MAX_CUE_FRACTION = 0.7
     const cueState = sfxTimeline.map(cue => ({ fraction: Math.min(cue.wordIndex / totalWords, MAX_CUE_FRACTION), sound: cue.sound, fired: false }))
 
-    const wordTimings = buildWordTimings(sceneData.narration)
+    const wordTimings = buildWordTimings(sceneData.narration, lang)
     const exactTimes = Array.isArray(sceneData.narrationWordTimes) && sceneData.narrationWordTimes.length === wordTimings.words.length
       ? sceneData.narrationWordTimes : null
     let lastWord = -1
@@ -642,7 +684,11 @@ export default function StoryPlayer() {
       setActiveWord(-1)
 
       const nextIndex = sceneIndex + 1
-      if (nextIndex >= scenes.length) return
+      if (nextIndex >= scenes.length) {
+        // Finished the last page: pause a moment, then show the ending.
+        setTimeout(() => { if (playTokenRef.current === myToken) setShowEnd(true) }, 1200)
+        return
+      }
       const nextScene = scenes[nextIndex]
 
       if (isSceneReady(nextScene)) {
@@ -686,7 +732,7 @@ export default function StoryPlayer() {
     } else {
       setSpeaking(true)
     }
-  }, [scenes, playSfx, stopAudio])
+  }, [scenes, playSfx, stopAudio, lang])
 
   const playNarration = useCallback(() => {
     if (speaking || loadingAudio || !current?.narrationUrl) return
@@ -726,6 +772,7 @@ export default function StoryPlayer() {
 
   useEffect(() => {
     const handler = (e) => {
+      reveal()
       if (e.key === 'ArrowRight') goNext()
       if (e.key === 'ArrowLeft') goPrev()
       if (e.key === ' ') { e.preventDefault(); speaking ? stopAudio() : playNarration() }
@@ -733,7 +780,7 @@ export default function StoryPlayer() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [goNext, goPrev, speaking, stopAudio, playNarration, exitCinema])
+  }, [goNext, goPrev, speaking, stopAudio, playNarration, exitCinema, reveal])
 
   // Stop all audio on unmount
   useEffect(() => {
@@ -784,8 +831,32 @@ export default function StoryPlayer() {
   // nothing but the panel below the header/progress bar, there's nothing left
   // for a gap to appear in — the panel simply fills whatever space exists.
   const useOverlayControls = compact || projector
-  const nextIsLastAndUnreachable = scene === scenes.length - 1
-  const nextDisabled = nextIsLastAndUnreachable || waitingForNext
+  const nextIsLastAndUnreachable = false // the last page's arrow opens the ending screen
+  const nextDisabled = waitingForNext
+  const ctlStyle = {
+    transition: 'opacity 0.35s ease',
+    opacity: controlsVisible ? 1 : 0,
+    pointerEvents: controlsVisible ? 'auto' : 'none'
+  }
+  const onRootClick = (e) => {
+    if (showEnd) return
+    // A press on a button just keeps the controls up a little longer.
+    if (e.target.closest && e.target.closest('button')) { reveal(); return }
+    // On a touch screen a tap on the picture or text shows or hides the
+    // controls. With a mouse, moving it shows them instead.
+    if (!speaking || !isTouchDevice) return
+    setControlsVisible(v => !v)
+    setRevealTick(t => t + 1)
+  }
+  const onRootPointerMove = (e) => {
+    if (e.pointerType !== 'mouse') return
+    const now = Date.now()
+    if (now - lastMoveRef.current < 800) return
+    lastMoveRef.current = now
+    if (!controlsVisible || speaking) reveal()
+  }
+  const charW = CHAR_WIDTH[lang] || 0.52
+  const fontFamily = 'Georgia, serif'
 
   // ---- One design for every screen: dark, with the picture softly blurred
   // behind. Wide screens (phone sideways, laptop, desktop) put the picture on
@@ -864,7 +935,9 @@ export default function StoryPlayer() {
     position: 'fixed', top: 0, left: 0, right: 0, height: `${viewportH}px`, zIndex: 9999,
     background: '#05040c', overflow: 'hidden', display: 'flex', boxSizing: 'border-box',
     paddingLeft: 'env(safe-area-inset-left, 0px)', paddingRight: 'env(safe-area-inset-right, 0px)',
+    cursor: isTouchDevice ? 'pointer' : 'default', WebkitTapHighlightColor: 'transparent',
   }
+  const rootProps = { onClick: onRootClick, onPointerMove: onRootPointerMove }
   const keyframes = (
     <style>{`
       @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -872,6 +945,36 @@ export default function StoryPlayer() {
     `}</style>
   )
   const narrationLen = (current?.narration || '').length
+
+  // ---- The ending screen: "The End", or "To be continued" for a cliffhanger ----
+  const tbc = !!story.toBeContinued
+  const endButton = (primary) => ({
+    width: '100%', padding: '13px 16px', borderRadius: 12, fontSize: 15, fontWeight: 600, cursor: 'pointer',
+    border: primary ? 'none' : '0.5px solid rgba(255,255,255,0.28)',
+    background: primary ? '#534AB7' : 'rgba(255,255,255,0.08)',
+    color: 'white'
+  })
+  const endCard = (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 20, background: 'rgba(5,4,12,0.88)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, overflowY: 'auto', animation: 'fadeIn 0.5s ease' }}>
+      <div style={{ width: '100%', maxWidth: 360, textAlign: 'center' }}>
+        <button onClick={() => setShowEnd(false)} aria-label="Close" style={{ position: 'absolute', top: 12, right: 14, background: 'none', border: 'none', color: 'rgba(255,255,255,0.6)', fontSize: 22, cursor: 'pointer' }}>✕</button>
+        <p style={{ margin: '0 0 6px 0', fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: 'rgba(255,255,255,0.55)' }}>
+          {story.title}{story.chapterNumber > 1 ? ` · Chapter ${story.chapterNumber}` : ''}
+        </p>
+        <p style={{ margin: '0 0 22px 0', fontSize: 34, fontWeight: 700, color: '#fff', fontFamily: 'Georgia, serif' }}>
+          {tbc ? 'To be continued…' : 'The End'}
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {tbc && isOwner && (
+            <button onClick={() => { stopAudio(); navigate(`/create?continue=${story.id}`) }} style={endButton(true)}>✨ Continue the story</button>
+          )}
+          <button onClick={() => { setShowEnd(false); stopAudio(); setScene(0) }} style={endButton(!(tbc && isOwner))}>↻ Read again</button>
+          {isOwner && <button onClick={() => { stopAudio(); navigate(`/story/${story.id}/print`) }} style={endButton(false)}>🖨 Print or save as a book</button>}
+          <button onClick={() => { stopAudio(); isOwner ? navigate('/profile?tab=library') : navigate(-1) }} style={endButton(false)}>{isOwner ? 'Back to my library' : '← Back'}</button>
+        </div>
+      </div>
+    </div>
+  )
 
   // ---- Wide: picture left, story right ----
   if (landscape) {
@@ -881,17 +984,18 @@ export default function StoryPlayer() {
     const textW = Math.max(120, vw - imgW - padX * 2)
     const textH = Math.max(60, viewportH - 190)
     const maxFs = isTouchDevice ? 22 : Math.max(22, Math.min(40, Math.round(viewportH / 20)))
-    const fs = fitFontSize(narrationLen, textW, textH, maxFs)
+    const fs = fitFontSize(narrationLen, textW, textH, maxFs, 11, charW)
     return (
-      <div style={rootStyle}>
+      <div style={rootStyle} {...rootProps}>
         {keyframes}
+        {showEnd && endCard}
         {backdrop}
         {barHintPill}
         <div style={{ position: 'relative', width: imgW, height: '100%', flexShrink: 0, background: '#1a1830', overflow: 'hidden' }}>
           {imgSrc && <img key={scene} src={imgSrc} alt={`Scene ${scene + 1}`} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', animation: 'fadeIn 0.6s ease', display: 'block' }} />}
         </div>
         <div style={{ position: 'relative', flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: `10px ${padX}px 10px ${padX}px`, boxSizing: 'border-box' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, minHeight: 36 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, minHeight: 36, ...ctlStyle }}>
             {!cinema && backButton}
             <div style={{ flex: 1 }} />
             {learningPill}
@@ -900,13 +1004,13 @@ export default function StoryPlayer() {
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <p style={{ margin: '0 0 8px 0', fontSize: isTouchDevice ? 12 : 14, fontWeight: 700, color: 'rgba(255,255,255,0.65)', fontFamily: 'Georgia, serif', textTransform: 'uppercase', letterSpacing: 1 }}>{current?.chapter}</p>
             <p style={{ margin: 0, fontSize: fs, lineHeight: 1.55, color: '#fff', fontFamily: 'Georgia, serif', textShadow: '0 1px 3px rgba(0,0,0,0.5)' }}>
-              <NarrationText text={current?.narration} learning={learningMode} activeIndex={activeWord} dark />
+              <NarrationText text={current?.narration} learning={learningMode} activeIndex={activeWord} dark lang={lang} />
             </p>
           </div>
           <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {buttonsRow(onReadAloud, isTouchDevice ? 40 : 52)}
+            <div style={ctlStyle}>{buttonsRow(onReadAloud, isTouchDevice ? 40 : 52)}</div>
             {statusLine}
-            <div style={{ height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.12)' }}>
+            <div style={{ height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.12)', ...ctlStyle }}>
               <div style={{ height: '100%', width: `${progress}%`, background: '#7F77DD', borderRadius: 2, transition: 'width 0.4s' }} />
             </div>
           </div>
@@ -917,13 +1021,14 @@ export default function StoryPlayer() {
 
   // ---- Upright: picture on top, story under it, controls at the bottom ----
   const vw = window.innerWidth
-  const fsUp = fitFontSize(narrationLen, vw - 40, Math.round(viewportH * 0.3), 19, 13)
+  const fsUp = fitFontSize(narrationLen, vw - 40, Math.round(viewportH * 0.3), 19, 13, charW)
   return (
-    <div style={{ ...rootStyle, flexDirection: 'column', paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
+    <div style={{ ...rootStyle, flexDirection: 'column', paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }} {...rootProps}>
       {keyframes}
+      {showEnd && endCard}
       {backdrop}
       {barHintPill}
-      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', flexShrink: 0, background: 'rgba(0,0,0,0.35)' }}>
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', flexShrink: 0, background: 'rgba(0,0,0,0.35)', ...ctlStyle }}>
         {backButton}
         <p style={{ flex: 1, minWidth: 0, margin: 0, fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.9)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{story.title}</p>
         {learningPill}
@@ -935,12 +1040,12 @@ export default function StoryPlayer() {
       <div style={{ position: 'relative', flexShrink: 0, padding: '14px 20px 10px', background: 'rgba(0,0,0,0.38)' }}>
         <p style={{ margin: '0 0 6px 0', fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.65)', fontFamily: 'Georgia, serif', textTransform: 'uppercase', letterSpacing: 1 }}>{current?.chapter}</p>
         <p style={{ margin: 0, fontSize: fsUp, lineHeight: 1.55, color: '#fff', fontFamily: 'Georgia, serif', textShadow: '0 1px 3px rgba(0,0,0,0.5)' }}>
-          <NarrationText text={current?.narration} learning={learningMode} activeIndex={activeWord} dark />
+          <NarrationText text={current?.narration} learning={learningMode} activeIndex={activeWord} dark lang={lang} />
         </p>
       </div>
       <div style={{ position: 'relative', flexShrink: 0, padding: '8px 10px 12px', display: 'flex', flexDirection: 'column', gap: 10, background: 'rgba(0,0,0,0.38)' }}>
-        {dotsRow}
-        {buttonsRow(onReadAloud, 44)}
+        <div style={ctlStyle}>{dotsRow}</div>
+        <div style={ctlStyle}>{buttonsRow(onReadAloud, 44)}</div>
         {statusLine}
       </div>
     </div>

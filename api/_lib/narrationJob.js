@@ -13,14 +13,45 @@
 
 import { uploadToS3 } from './s3.js'
 import { findPauses, refineWithPauses } from './wordTiming.js'
+import { tokenize, norm } from './words.js'
 
-const norm = (s) => (s || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
+const LANGUAGE_NAMES = { en: 'English', es: 'Spanish', fr: 'French', zh: 'Mandarin Chinese', hi: 'Hindi' }
 
 // Lines the story's own words up with the transcribed words and returns one
 // start time (seconds) per story word. Words the transcription missed or
 // split differently are filled in by interpolating between known neighbours.
-export function alignWordTimes(narrationText, heard) {
-  const words = (narrationText || '').trim().split(/\s+/).filter(Boolean)
+export function alignWordTimes(narrationText, heard, lang = 'en') {
+  if (lang === 'zh') return alignChineseTimes(tokenize(narrationText, 'zh'), heard)
+  const words = tokenize(narrationText, lang)
+  return alignWords(words, heard)
+}
+
+// Chinese is lined up one character at a time (the transcription reports
+// short pieces, not our word cuts), then each word takes the time of its
+// first character.
+function alignChineseTimes(tokens, heard) {
+  const isChar = (c) => /[\p{L}\p{M}\p{N}]/u.test(c)
+  const heardChars = []
+  for (const h of heard) {
+    const chars = Array.from(h.word || '').filter(isChar)
+    chars.forEach((c, k) => heardChars.push({
+      word: c,
+      start: h.start + ((h.end - h.start) * k) / chars.length,
+      end: h.start + ((h.end - h.start) * (k + 1)) / chars.length
+    }))
+  }
+  const targetChars = []
+  const owner = []
+  tokens.forEach((tok, wi) => Array.from(tok).filter(isChar).forEach(c => { targetChars.push(c); owner.push(wi) }))
+  const charStarts = alignWords(targetChars, heardChars)
+  if (!charStarts) return null
+  const starts = new Array(tokens.length).fill(null)
+  owner.forEach((wi, ci) => { if (starts[wi] === null) starts[wi] = charStarts[ci] })
+  for (let i = 0; i < starts.length; i++) if (starts[i] === null) starts[i] = i > 0 ? starts[i - 1] : 0
+  return starts
+}
+
+function alignWords(words, heard) {
   const n = words.length
   const starts = new Array(n).fill(null)
   let j = 0
@@ -56,10 +87,12 @@ export function alignWordTimes(narrationText, heard) {
   return starts.map(v => Math.round(v * 100) / 100)
 }
 
-async function transcribeWordTimes(audioBuffer, narrationText) {
+async function transcribeWordTimes(audioBuffer, narrationText, lang = 'en') {
   const form = new FormData()
   form.append('file', new Blob([audioBuffer], { type: 'audio/mpeg' }), 'narration.mp3')
   form.append('model', 'whisper-1')
+  // Telling it the language makes the transcription far more reliable.
+  if (LANGUAGE_NAMES[lang]) form.append('language', lang)
   form.append('response_format', 'verbose_json')
   form.append('timestamp_granularities[]', 'word')
   // Giving it the real text helps it spell names and unusual words the same way.
@@ -72,16 +105,20 @@ async function transcribeWordTimes(audioBuffer, narrationText) {
   })
   if (!res.ok) throw new Error(`Transcription failed: ${res.status} ${await res.text().catch(() => '')}`)
   const data = await res.json()
-  const rough = alignWordTimes(narrationText, data.words || [])
+  const rough = alignWordTimes(narrationText, data.words || [], lang)
   if (!rough) return null
   // Sharpen against the real pauses in the audio. If that can't be done, the
   // rough speech to text times are used as they are.
-  const words = narrationText.trim().split(/\s+/).filter(Boolean)
+  const words = tokenize(narrationText, lang)
   const info = await findPauses(audioBuffer)
   return refineWithPauses(words, rough, info)
 }
 
-export async function generateNarrationAudio({ narrationText, storyId, sceneIndex }) {
+export async function generateNarrationAudio({ narrationText, storyId, sceneIndex, language = 'en' }) {
+  const langName = LANGUAGE_NAMES[language] || 'English'
+  const baseVoice = 'Speak warmly and gently, like a parent reading a bedtime story. Use a calm, expressive, storytelling tone.'
+  const instructions = language === 'en' ? baseVoice : `${baseVoice} The text is in ${langName}. Read it aloud in natural, native ${langName}, with a clear and friendly accent.`
+
   const response = await fetch('https://api.openai.com/v1/audio/speech', {
     method: 'POST',
     headers: {
@@ -92,7 +129,7 @@ export async function generateNarrationAudio({ narrationText, storyId, sceneInde
       model: 'gpt-4o-mini-tts',
       input: narrationText,
       voice: 'coral',
-      instructions: 'Speak warmly and gently, like a parent reading a bedtime story. Use a calm, expressive, storytelling tone.',
+      instructions,
       speed: 0.9
     })
   })
@@ -109,7 +146,7 @@ export async function generateNarrationAudio({ narrationText, storyId, sceneInde
   // Upload and timing run together so timing adds no extra wait.
   const [narrationUrl, wordTimes] = await Promise.all([
     uploadToS3(buf.toString('base64'), 'audio/mpeg', key),
-    transcribeWordTimes(buf, narrationText).catch((err) => {
+    transcribeWordTimes(buf, narrationText, language).catch((err) => {
       console.error(`Word timing failed for scene ${sceneIndex}:`, err.message)
       return null
     })

@@ -63,8 +63,9 @@ export async function findPauses(mp3Buffer) {
   }
 }
 
-const endsWithBreak = (w) => /[,.;:!?…—–]["'’”)\]]*$/.test(w)
-const weightOf = (w) => (w.replace(/[^\p{L}\p{N}]/gu, '').length || 1) + 1.5
+// Includes the full width marks used in Chinese and the Hindi full stop.
+const endsWithBreak = (w) => /[,.;:!?…—–，。！？；：、।]["'’”)\]」』）]*$/.test(w)
+const weightOf = (w) => (w.replace(/[^\p{L}\p{M}\p{N}]/gu, '').length || 1) + 1.5
 
 // words: the story's words. starts: rough start time per word (from speech to
 // text). Returns refined start times, or the originals if anything looks off.

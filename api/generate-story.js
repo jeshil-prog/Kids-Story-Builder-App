@@ -40,7 +40,51 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: `You've used all ${limit} stories included in your plan this month. Upgrade for more.`, limitReached: true })
   }
 
-  const { characters, prompt, genre, style, length } = req.body
+  const { characters, prompt, genre, style, length, language, toBeContinued, previous } = req.body
+
+  if (!Array.isArray(characters) || characters.length === 0) {
+    return res.status(400).json({ error: 'Choose at least one character.' })
+  }
+
+  // The five story languages. Anything else falls back to English.
+  const LANGUAGE_NAMES = {
+    en: 'English',
+    es: 'Spanish',
+    fr: 'French',
+    zh: 'Simplified Chinese (Mandarin)',
+    hi: 'Hindi (Devanagari script)'
+  }
+  const lang = LANGUAGE_NAMES[language] ? language : 'en'
+  const langName = LANGUAGE_NAMES[lang]
+  const cliffhanger = toBeContinued === true
+
+  // When continuing an earlier story, the client sends what happened so far.
+  const prev = previous && typeof previous.text === 'string' && previous.text.trim()
+    ? {
+        title: String(previous.title || '').slice(0, 200),
+        text: previous.text.slice(0, 9000),
+        chapterNumber: Math.min(50, Math.max(1, parseInt(previous.chapterNumber, 10) || 1))
+      }
+    : null
+
+  // How long a scene is. Chinese has no spaces, so it is counted in characters.
+  const sceneLen = lang === 'zh' ? 'about 55 to 75 Chinese characters' : '35-45 words'
+
+  const languageRule = lang === 'en' ? '' : `- Write the title, tagline, every chapter title and all of the narration in ${langName}, in natural wording a native speaker would use when reading to a child. Keep every imagePrompt and every sound description in English, because other tools read those. Every triggerPhrase must be copied exactly from the ${langName} narration.${lang === 'zh' ? ' Use full width Chinese punctuation and do not put spaces between Chinese characters.' : ''}\n`
+
+  const endingRule = cliffhanger
+    ? `- This story is not finished. End the final scene on a gentle, exciting cliffhanger that makes the reader want the next chapter, such as a mysterious discovery, a surprise visitor, a strange sound, or a door that has just creaked open. Do NOT answer the main question of the story, and do NOT end with a heart message or a goodbye. Nothing frightening and nobody in danger; the mood stays warm and curious. The last sentence should hang in the air.`
+    : prev
+      ? `- This is the final chapter, so bring the whole story to a satisfying, happy close, tying up what happened in the earlier chapters. End with a warm heart message about family, friendship or courage\n- Always end happily`
+      : `- End the story with a warm heart message about family, friendship or courage\n- Always end happily`
+
+  const continuation = prev
+    ? `This is chapter ${prev.chapterNumber + 1} of an ongoing story called "${prev.title}". Here is the story so far, for reference only:\n\"\"\"\n${prev.text}\n\"\"\"\nContinue directly from where the last chapter stopped, with the same characters and setting. Do not retell or repeat what already happened, and do not introduce the characters again. Give this chapter its own title.\n\n`
+    : ''
+
+  const ideaLine = typeof prompt === 'string' && prompt.trim()
+    ? `Story idea${prev ? ' for what happens next' : ''}: "${prompt}"`
+    : 'Story idea: choose a natural, exciting next part of the adventure yourself.'
 
   const sceneCount = length === 'quick' ? 5 : length === 'chapter' ? 10 : 8
 
@@ -70,18 +114,17 @@ Key rules:
 - Include vivid specific details: colours, sounds, textures, emotions
 - Add dialogue with quotation marks to bring scenes alive
 - Build excitement and tension across scenes
-- Each scene is 2-3 sentences, 35-45 words total — short, punchy sentences, not long compound ones. Never chain multiple clauses together with commas/"and" to cram extra content into one sentence — if it needs a comma to add another action or detail, it should probably be its own short sentence instead, or cut entirely
-- End the story with a warm heart message about family, friendship or courage
-- Always end happily
+- Each scene is 2-3 sentences, ${sceneLen} total — short, punchy sentences, not long compound ones. Never chain multiple clauses together with commas/"and" to cram extra content into one sentence — if it needs a comma to add another action or detail, it should probably be its own short sentence instead, or cut entirely
+${languageRule}${endingRule}
 
 Respond ONLY with valid JSON. No markdown, no code fences, no extra text.`
 
-  const userPrompt = `Write a ${sceneCount}-scene personalised children's adventure story.
+  const userPrompt = `${continuation}Write a ${sceneCount}-scene personalised children's adventure story.
 
 Characters starring in this story:
 ${characterDesc}
 
-Story idea: "${prompt}"
+${ideaLine}
 Genre: ${genre}
 Visual style for illustrations: ${style}
 
@@ -93,7 +136,7 @@ Return this exact JSON shape:
     {
       "sceneNumber": 1,
       "chapter": "Short exciting scene title (e.g. 'The Discovery', 'Setting Sail', 'The Hidden Cave')",
-      "narration": "2-3 SHORT sentences, 35-45 words total — tight and vivid, not padded, and no long comma-chained sentences standing in for several. Use character names. Include specific details, emotion, and dialogue where it earns its place. Match the warm adventure tone of the example.",
+      "narration": "2-3 SHORT sentences, ${sceneLen} total — tight and vivid, not padded, and no long comma-chained sentences standing in for several. Use character names. Include specific details, emotion, and dialogue where it earns its place. Match the warm adventure tone of the example.",
       "imagePrompt": "Describe EXACTLY what the character is physically doing in this scene for a ${visualStyle} children's picture book illustration. Format: [CHARACTER ACTION] + [ENVIRONMENT]. Be very specific about the action. Examples: 'Jessie rows a small wooden boat across a sparkling blue ocean, leaning forward with effort, dolphins jumping alongside, tropical island visible in background, golden afternoon light' OR 'Jessie crouches in a dark cave holding a glowing torch, eyes wide with wonder, ancient treasure chests scattered around, gold coins spilling out, waterfall visible at cave entrance' OR 'Jessie sits cross-legged on a clifftop at sunset, holding a treasure map, pointing excitedly at something in the distance, jungle stretching below, pink and orange sky'. Always specify: what the character is doing with their body/hands, their facial expression, and the full environment around them.",
       "sfxCues": [
         {
@@ -116,7 +159,7 @@ Return this exact JSON shape:
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 6000,
+        max_tokens: 9000, // Hindi and Chinese use many more tokens than English
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }]
       })

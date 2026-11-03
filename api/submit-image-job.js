@@ -21,7 +21,7 @@ import { generateNarrationAudio } from './_lib/narrationJob.js'
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  const { imagePrompt, style, characters, storyId, sceneIndex, narrationText } = req.body
+  const { imagePrompt, style, characters, storyId, sceneIndex, narrationText, language } = req.body
 
   if (!storyId || sceneIndex === undefined) {
     return res.status(400).json({ error: 'Missing storyId or sceneIndex' })
@@ -50,7 +50,7 @@ export default async function handler(req, res) {
       const existingAudio = await redisGet(audioKey).catch(() => null)
       if (existingAudio?.status !== 'done') {
         await redisSet(audioKey, { status: 'processing' }, 3600)
-        narrationPromise = generateNarrationAudio({ narrationText, storyId, sceneIndex })
+        narrationPromise = generateNarrationAudio({ narrationText, storyId, sceneIndex, language: language || 'en' })
           .then(async ({ narrationUrl, wordTimes }) => {
             await redisSet(audioKey, { status: 'done', narrationUrl, wordTimes }, 3600)
             return narrationUrl

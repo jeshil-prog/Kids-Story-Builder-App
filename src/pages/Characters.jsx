@@ -292,7 +292,7 @@ export default function Characters() {
         </div>
         {!adding && (
           atLimit ? (
-            <Link to="/profile" style={{ fontSize: 12, color: '#534AB7', fontWeight: 600, textDecoration: 'none' }}>
+            <Link to="/profile?tab=plan" style={{ fontSize: 12, color: '#534AB7', fontWeight: 600, textDecoration: 'none' }}>
               🔒 {ownCharacters.length}/{limit} used — upgrade for more
             </Link>
           ) : (

@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../lib/AuthContext'
 import { useStore } from '../lib/store'
+import { Avatar } from '../components/UI'
+import LibraryGrid from '../components/LibraryGrid'
+import FriendsPanel from '../components/FriendsPanel'
 
 const TIER_INFO = {
   free: { name: 'Free', storyLimit: 3, characterLimit: 2, price: null },
@@ -22,8 +25,9 @@ const COMPARE_ROWS = [
   { label: 'Share with friends', free: '✕', tier1: '✓', tier2: '✓' },
 ]
 
-export default function Profile() {
-  const { user, logout } = useAuth()
+// The plan and billing section (the old Profile page), now one tab of the new Profile.
+function PlanPanel() {
+  const { user } = useAuth()
   const { stories, characters } = useStore()
   const [searchParams] = useSearchParams()
   const [subscription, setSubscription] = useState(null)
@@ -104,9 +108,7 @@ export default function Profile() {
   }
 
   return (
-    <div style={{ flex: 1, padding: 20, maxWidth: 520, margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
-      <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)', margin: '8px 0 4px' }}>Profile & Billing</h1>
-      <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 20px' }}>{user.email}</p>
+    <div style={{ maxWidth: 520 }}>
 
       {checkoutResult === 'success' && (
         <div style={{ padding: '10px 14px', borderRadius: 10, background: checkoutPolling ? 'var(--surface-card)' : '#E7F7F0', color: checkoutPolling ? 'var(--text-muted)' : '#1D9E75', fontSize: 13, marginBottom: 16 }}>
@@ -203,7 +205,153 @@ export default function Profile() {
         </>
       )}
 
-      <button onClick={logout} style={{ marginTop: 24, background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 13, cursor: 'pointer' }}>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+
+const TABS = [
+  { id: 'library', label: 'Library' },
+  { id: 'friends', label: 'Friends' },
+  { id: 'photos', label: 'Photos' },
+  { id: 'plan', label: 'Plan' },
+]
+
+const tabButton = (active) => ({
+  flex: '1 0 auto', padding: '9px 14px', borderRadius: 100, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap',
+  border: '0.5px solid', transition: 'all 0.15s',
+  background: active ? '#EEEDFE' : 'transparent',
+  borderColor: active ? '#534AB7' : 'var(--border-strong)',
+  color: active ? '#3C3489' : 'var(--text-secondary)',
+  fontWeight: active ? 600 : 400
+})
+
+export default function Profile() {
+  const { user, logout } = useAuth()
+  const { stories, characters, deleteStory } = useStore()
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // Coming back from checkout lands on the Plan tab. Otherwise the Library opens first.
+  const requested = searchParams.get('tab')
+  const tab = TABS.some(t => t.id === requested) ? requested : (searchParams.get('checkout') ? 'plan' : 'library')
+  const goTab = (id) => setSearchParams(id === 'library' ? {} : { tab: id }, { replace: true })
+
+  const [displayName, setDisplayName] = useState(null) // null until loaded
+  const [editing, setEditing] = useState(false)
+  const [draftName, setDraftName] = useState('')
+  const [savingName, setSavingName] = useState(false)
+  const [nameError, setNameError] = useState(null)
+
+  useEffect(() => {
+    supabase.from('profiles').select('display_name').eq('id', user.id).single()
+      .then(({ data }) => setDisplayName(data?.display_name || user.email.split('@')[0]))
+  }, [user.id])
+
+  const saveName = async () => {
+    const name = draftName.trim()
+    if (name.length < 1 || name.length > 40) { setNameError('Please use between 1 and 40 characters.'); return }
+    setSavingName(true)
+    setNameError(null)
+    const { error } = await supabase.from('profiles').update({ display_name: name }).eq('id', user.id)
+    setSavingName(false)
+    if (error) { setNameError('Could not save your name. Please try again.'); return }
+    setDisplayName(name)
+    setEditing(false)
+  }
+
+  const ownPhotos = characters
+    .filter(c => c.ownerId === user.id && c.photoUrl)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+
+  const shownName = displayName || user.email.split('@')[0]
+
+  return (
+    <div style={{ flex: 1, padding: 20, maxWidth: 720, margin: '0 auto', width: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, margin: '8px 0 20px' }}>
+        <Avatar name={shownName} size={60} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {editing ? (
+            <div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  autoFocus value={draftName} maxLength={40}
+                  onChange={(e) => setDraftName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') saveName(); if (e.key === 'Escape') setEditing(false) }}
+                  style={{ flex: 1, minWidth: 0, padding: '8px 12px', borderRadius: 10, fontSize: 15, border: '0.5px solid var(--border)', background: 'var(--surface-input)', color: 'var(--text-primary)' }}
+                />
+                <button onClick={saveName} disabled={savingName} style={{ padding: '8px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600, background: '#534AB7', color: 'white', border: 'none', cursor: 'pointer' }}>{savingName ? '…' : 'Save'}</button>
+                <button onClick={() => setEditing(false)} style={{ padding: '8px 10px', borderRadius: 10, fontSize: 13, background: 'none', color: 'var(--text-muted)', border: 'none', cursor: 'pointer' }}>Cancel</button>
+              </div>
+              {nameError && <p style={{ fontSize: 12, color: '#E24B4A', margin: '6px 0 0' }}>{nameError}</p>}
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '6px 0 0' }}>This is the name your friends see.</p>
+            </div>
+          ) : (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shownName}</h1>
+                <button onClick={() => { setDraftName(shownName); setNameError(null); setEditing(true) }} style={{ background: 'none', border: 'none', color: '#534AB7', fontSize: 12, cursor: 'pointer', padding: 0 }}>Edit name</button>
+              </div>
+              <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '2px 0 0' }}>{user.email}</p>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, overflowX: 'auto', paddingBottom: 2 }}>
+        {TABS.map(t => (
+          <button key={t.id} onClick={() => goTab(t.id)} aria-pressed={tab === t.id} style={tabButton(tab === t.id)}>
+            {t.label}{t.id === 'library' && stories.length > 0 ? ` (${stories.length})` : ''}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'library' && (
+        stories.length === 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '40px 20px', textAlign: 'center' }}>
+            <p style={{ fontSize: 36, margin: 0 }}>📚</p>
+            <p style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>Your library is empty</p>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, margin: 0 }}>Stories you make are saved here automatically.</p>
+            <Link to="/create" style={{ color: '#534AB7', fontSize: 14 }}>Create your first story →</Link>
+          </div>
+        ) : (
+          <LibraryGrid stories={stories} owner onDelete={deleteStory} newStoryTile />
+        )
+      )}
+
+      {tab === 'friends' && <FriendsPanel />}
+
+      {tab === 'photos' && (
+        ownPhotos.length === 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '40px 20px', textAlign: 'center' }}>
+            <p style={{ fontSize: 36, margin: 0 }}>🖼️</p>
+            <p style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>No photos yet</p>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, margin: 0, maxWidth: 320 }}>Photos you add to your characters appear here.</p>
+            <Link to="/characters?new=1" style={{ color: '#534AB7', fontSize: 14 }}>Add a character →</Link>
+          </div>
+        ) : (
+          <>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 14px' }}>
+              Photos you have added to your characters. Only you can see this page.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 12 }}>
+              {ownPhotos.map(c => (
+                <a key={c.id} href={c.photoUrl} target="_blank" rel="noreferrer" style={{ textDecoration: 'none', color: 'inherit' }}>
+                  <div style={{ aspectRatio: '1 / 1', borderRadius: 14, overflow: 'hidden', background: 'var(--surface-card)', border: '0.5px solid var(--border)' }}>
+                    <img src={c.photoUrl} alt={c.name} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                  </div>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', margin: '6px 0 0' }}>{c.name}</p>
+                  {c.createdAt && <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0 }}>{new Date(c.createdAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}</p>}
+                </a>
+              ))}
+            </div>
+          </>
+        )
+      )}
+
+      {tab === 'plan' && <PlanPanel />}
+
+      <button onClick={logout} style={{ marginTop: 28, background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 13, cursor: 'pointer' }}>
         Log out
       </button>
     </div>

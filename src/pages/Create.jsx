@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../lib/AuthContext'
 import { Avatar, Button, SectionLabel, Spinner } from '../components/UI'
 import { v4 as uuidv4 } from 'uuid'
+import { LANGUAGES } from '../lib/languages'
 
 const GENRES = ['Ocean','Bedtime','Fantasy','Space','Jungle','Comedy','Adventure','Magic']
 const GENRE_EMOJI = { Ocean:'🌊', Bedtime:'🌙', Fantasy:'🧙', Space:'🚀', Jungle:'🦁', Comedy:'😄', Adventure:'⚗️', Magic:'✨' }
@@ -39,12 +40,27 @@ const GEN_STEPS = [
 export default function Create() {
   const navigate = useNavigate()
   const { user } = useAuth()
-  const { characters, saveStory } = useStore()
+  const { characters, saveStory, getStory } = useStore()
   const [selectedChars, setSelectedChars] = useState([])
   const [prompt, setPrompt] = useState('')
   const [genre, setGenre] = useState('Fantasy')
   const [style, setStyle] = useState('Pixar-like')
   const [length, setLength] = useState('story')
+  // The language is remembered between visits. Storage can be blocked, so it is wrapped.
+  const [language, setLanguage] = useState(() => {
+    try {
+      const saved = localStorage.getItem('sd_language')
+      return LANGUAGES.some(l => l.code === saved) ? saved : 'en'
+    } catch { return 'en' }
+  })
+  const chooseLanguage = (code) => {
+    setLanguage(code)
+    try { localStorage.setItem('sd_language', code) } catch {}
+  }
+  const [toBeContinued, setToBeContinued] = useState(false)
+  // Set once someone presses Generate while something is still missing, so the
+  // missing parts can be pointed out.
+  const [showMissing, setShowMissing] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [genStep, setGenStep] = useState(0)
   const [genDetail, setGenDetail] = useState('')
@@ -86,6 +102,23 @@ export default function Create() {
     setSearchParams({}, { replace: true })
   }, [characters, searchParams, user.id, setSearchParams])
 
+  // Continuing an earlier story: /create?continue=<story id>. The new chapter
+  // keeps the same characters, art style, genre and language as that story.
+  const continueId = searchParams.get('continue')
+  const [previousStory, setPreviousStory] = useState(null)
+  const [previousLoading, setPreviousLoading] = useState(!!continueId)
+  useEffect(() => {
+    if (!continueId) { setPreviousStory(null); setPreviousLoading(false); return }
+    let cancelled = false
+    setPreviousLoading(true)
+    getStory(continueId).then((s) => {
+      if (cancelled) return
+      setPreviousStory(s && s.ownerId === user.id ? s : null)
+      setPreviousLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [continueId, user.id])
+
   const characterLimit = CHARACTER_LIMITS[tier] ?? CHARACTER_LIMITS.free
   const ownCharacterCount = characters.filter(c => c.ownerId === user.id).length
   const atCharLimit = ownCharacterCount >= characterLimit
@@ -109,8 +142,30 @@ export default function Create() {
   const styleLocked = (styleId) => tier === 'free' && !CORE_STYLE_IDS.includes(styleId)
 
   const toggleChar = (id) => setSelectedChars(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id])
-  const chosenChars = characters.filter(c => selectedChars.includes(c.id))
-  const canGenerate = chosenChars.length > 0 && prompt.trim().length > 5 && !atLimit
+  const continuing = !!previousStory
+  const chosenChars = continuing ? (previousStory.characters || []) : characters.filter(c => selectedChars.includes(c.id))
+  const effectiveStyle = continuing ? (previousStory.style || style) : style
+  const effectiveGenre = continuing ? (previousStory.genre || genre) : genre
+  const effectiveLanguage = continuing ? (previousStory.language || 'en') : language
+
+  // Everything that is still needed before a story can be made, so the
+  // button can say so instead of just looking switched off.
+  const needsCharacters = !continuing && chosenChars.length === 0
+  const needsIdea = !continuing && prompt.trim().length <= 5
+  const missingKeys = [needsCharacters && 'characters', needsIdea && 'prompt'].filter(Boolean)
+  const canGenerate = missingKeys.length === 0 && !atLimit
+  const highlight = (key) => (showMissing && missingKeys.includes(key))
+    ? { outline: '2px solid #E24B4A', outlineOffset: 8, borderRadius: 12 }
+    : null
+  const onGenerateClick = () => {
+    if (atLimit) return
+    if (missingKeys.length > 0) {
+      setShowMissing(true)
+      document.getElementById(`create-${missingKeys[0]}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      return
+    }
+    generate()
+  }
 
   const generate = async () => {
     setGenerating(true)
@@ -133,7 +188,14 @@ export default function Create() {
         },
         body: JSON.stringify({
           characters: chosenChars.map(c => ({ name: c.name, age: c.age, personality: c.personality, role: c.role })),
-          prompt, genre, style, length
+          prompt, genre: effectiveGenre, style: effectiveStyle, length,
+          language: effectiveLanguage,
+          toBeContinued,
+          previous: continuing ? {
+            title: previousStory.title,
+            chapterNumber: previousStory.chapterNumber || 1,
+            text: (previousStory.scenes || []).map(sc => sc.narration).filter(Boolean).join(' ')
+          } : null
         })
       })
       if (!storyRes.ok) {
@@ -187,7 +249,8 @@ export default function Create() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               imagePrompt: scene.imagePrompt,
-              style,
+              style: effectiveStyle,
+              language: effectiveLanguage,
               storyId: id,
               sceneIndex: i,
               characters: charPayload,
@@ -199,7 +262,11 @@ export default function Create() {
 
       const fullStory = {
         id, title: story.title, tagline: story.tagline,
-        genre, style, length,
+        genre: effectiveGenre, style: effectiveStyle, length,
+        language: effectiveLanguage,
+        toBeContinued,
+        chapterNumber: continuing ? (previousStory.chapterNumber || 1) + 1 : 1,
+        continuesStoryId: continuing ? previousStory.id : null,
         characters: chosenChars,
         scenes: story.scenes,
         createdAt: Date.now()
@@ -300,7 +367,7 @@ export default function Create() {
             {error}
             <br/>
             {limitReached && (
-              <Link to="/profile" style={{ color: '#534AB7', fontSize: 13, fontWeight: 600, display: 'inline-block', marginTop: 8 }}>
+              <Link to="/profile?tab=plan" style={{ color: '#534AB7', fontSize: 13, fontWeight: 600, display: 'inline-block', marginTop: 8 }}>
                 View plans →
               </Link>
             )}
@@ -312,8 +379,47 @@ export default function Create() {
     )
   }
 
+  if (continueId && previousLoading) {
+    return (
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 40 }}>
+        <Spinner />
+      </div>
+    )
+  }
+  if (continueId && !previousStory) {
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 40, textAlign: 'center' }}>
+        <p style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>We could not find that story</p>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>You can only continue stories from your own library.</p>
+        <button onClick={() => navigate('/create', { replace: true })} style={{ color: '#534AB7', background: 'none', border: 'none', cursor: 'pointer', fontSize: 14 }}>Start a new story</button>
+      </div>
+    )
+  }
+
+  const ideaPlaceholder = `e.g. ${chosenChars.length > 0 ? chosenChars[0].name : 'Mia'} discovers a glowing turtle on a magical ocean adventure and must help it find its way home through an underwater cave…`
+
   return (
     <div style={{ overflowY: 'auto', flex: 1, padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 28 }}>
+      {continuing && (
+        <div style={{ background: '#EEEDFE', border: '1px solid #C9C5F4', borderRadius: 14, padding: '14px 16px' }}>
+          <p style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#534AB7', margin: '0 0 4px 0' }}>
+            Chapter {(previousStory.chapterNumber || 1) + 1}
+          </p>
+          <p style={{ fontSize: 15, fontWeight: 600, color: '#3C3489', margin: '0 0 6px 0' }}>Continuing "{previousStory.title}"</p>
+          <p style={{ fontSize: 13, color: '#4B4590', margin: '0 0 8px 0', lineHeight: 1.5 }}>
+            Same characters, art style and language as the last chapter. Say what should happen next, or leave it blank and we will surprise you.
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+            {chosenChars.map(c => (
+              <span key={c.id || c.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'white', borderRadius: 100, padding: '3px 10px 3px 3px', fontSize: 12, color: '#3C3489' }}>
+                <Avatar name={c.name} photo={c.photoUrl || c.photo} size={22} />{c.name}
+              </span>
+            ))}
+            <button onClick={() => navigate('/create', { replace: true })} style={{ background: 'none', border: 'none', color: '#534AB7', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>Start a new story instead</button>
+          </div>
+        </div>
+      )}
+
       {atLimit && (
         <div style={{ background: '#FFF6E5', border: '1px solid #F2C879', borderRadius: 14, padding: '16px 18px' }}>
           <p style={{ fontSize: 15, fontWeight: 600, color: '#5A3A00', margin: '0 0 6px 0' }}>
@@ -325,7 +431,7 @@ export default function Create() {
             Your stories reset on {resetLabel}.{tier !== 'tier2' && ' Upgrade to keep creating now.'}
           </p>
           {tier !== 'tier2' && (
-            <Link to="/profile" style={{ display: 'inline-block', background: '#534AB7', color: 'white', fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 100, textDecoration: 'none' }}>
+            <Link to="/profile?tab=plan" style={{ display: 'inline-block', background: '#534AB7', color: 'white', fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 100, textDecoration: 'none' }}>
               View plans
             </Link>
           )}
@@ -333,10 +439,15 @@ export default function Create() {
       )}
 
       {/* Step 1: Characters */}
-      <section>
+      {!continuing && (
+      <>
+      <section id="create-characters" style={highlight('characters') || undefined}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
           <div style={{ width: 24, height: 24, borderRadius: '50%', background: '#534AB7', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>1</div>
           <h2 style={{ fontSize: 16, fontWeight: 600 }}>Choose characters</h2>
+          <span style={{ fontSize: 11, color: needsCharacters && showMissing ? '#E24B4A' : 'var(--text-muted)', fontWeight: needsCharacters && showMissing ? 600 : 400 }}>
+            {needsCharacters && showMissing ? 'Required: pick at least one' : 'Required'}
+          </span>
         </div>
         {characters.length === 0 ? (
           <div style={{ padding: '20px', background: 'var(--surface-card)', border: '0.5px dashed var(--border-strong)', borderRadius: 14, textAlign: 'center' }}>
@@ -390,7 +501,7 @@ export default function Create() {
               {tier === 'free' ? ' Tier 1 lets you have 6, and Tier 2 has no limit.' : ' Tier 2 has no limit.'}
             </p>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <Link to="/profile" style={{ display: 'inline-block', background: '#534AB7', color: 'white', fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 100, textDecoration: 'none' }}>
+              <Link to="/profile?tab=plan" style={{ display: 'inline-block', background: '#534AB7', color: 'white', fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 100, textDecoration: 'none' }}>
                 View plans
               </Link>
               <button onClick={() => setShowCharUpgrade(false)} style={{ background: 'none', border: 'none', color: '#4B4590', fontSize: 13, cursor: 'pointer' }}>Not now</button>
@@ -400,17 +511,22 @@ export default function Create() {
       </section>
 
       <div style={{ height: '0.5px', background: 'var(--border)' }} />
+      </>
+      )}
 
       {/* Step 2: Prompt */}
-      <section>
+      <section id="create-prompt" style={highlight('prompt') || undefined}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          <div style={{ width: 24, height: 24, borderRadius: '50%', background: '#534AB7', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>2</div>
-          <h2 style={{ fontSize: 16, fontWeight: 600 }}>What's the story about?</h2>
+          <div style={{ width: 24, height: 24, borderRadius: '50%', background: '#534AB7', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{continuing ? 1 : 2}</div>
+          <h2 style={{ fontSize: 16, fontWeight: 600 }}>{continuing ? 'What happens next?' : "What's the story about?"}</h2>
+          <span style={{ fontSize: 11, color: needsIdea && showMissing ? '#E24B4A' : 'var(--text-muted)', fontWeight: needsIdea && showMissing ? 600 : 400 }}>
+            {continuing ? 'Optional' : needsIdea && showMissing ? 'Required: a few words' : 'Required'}
+          </span>
         </div>
         <textarea
           value={prompt}
           onChange={e => setPrompt(e.target.value)}
-          placeholder={`e.g. ${chosenChars.length > 0 ? chosenChars[0].name : 'Mia'} discovers a glowing turtle on a magical ocean adventure and must help it find its way home through an underwater cave…`}
+          placeholder={continuing ? 'e.g. They follow the glowing footprints into the forest and meet a talking owl…' : ideaPlaceholder}
           rows={3}
           style={{
             width: '100%', padding: '12px 14px', borderRadius: 12,
@@ -422,7 +538,7 @@ export default function Create() {
           onFocus={e => e.target.style.borderColor = '#534AB7'}
           onBlur={e => e.target.style.borderColor = 'var(--border)'}
         />
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+        {!continuing && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
           {GENRES.map(g => (
             <button
               key={g}
@@ -439,12 +555,14 @@ export default function Create() {
               {GENRE_EMOJI[g]} {g}
             </button>
           ))}
-        </div>
+        </div>}
       </section>
 
       <div style={{ height: '0.5px', background: 'var(--border)' }} />
 
-      {/* Step 3: Visual style */}
+      {/* Step 3: Visual style (kept from the earlier chapter when continuing) */}
+      {!continuing && (
+      <>
       <section>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
           <div style={{ width: 24, height: 24, borderRadius: '50%', background: '#534AB7', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>3</div>
@@ -475,17 +593,19 @@ export default function Create() {
         </div>
         {tier === 'free' && (
           <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
-            🔒 More styles available on <Link to="/profile" style={{ color: '#534AB7' }}>paid plans</Link>
+            🔒 More styles available on <Link to="/profile?tab=plan" style={{ color: '#534AB7' }}>paid plans</Link>
           </p>
         )}
       </section>
 
       <div style={{ height: '0.5px', background: 'var(--border)' }} />
+      </>
+      )}
 
       {/* Step 4: Length */}
       <section>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          <div style={{ width: 24, height: 24, borderRadius: '50%', background: '#534AB7', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>4</div>
+          <div style={{ width: 24, height: 24, borderRadius: '50%', background: '#534AB7', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{continuing ? 2 : 4}</div>
           <h2 style={{ fontSize: 16, fontWeight: 600 }}>Story length</h2>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
@@ -507,6 +627,70 @@ export default function Create() {
         </div>
       </section>
 
+      {/* Language (a continued story keeps its own language) */}
+      {!continuing && (
+      <>
+      <div style={{ height: '0.5px', background: 'var(--border)' }} />
+      <section>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <div style={{ width: 24, height: 24, borderRadius: '50%', background: '#534AB7', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>5</div>
+          <h2 style={{ fontSize: 16, fontWeight: 600 }}>Language</h2>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {LANGUAGES.map(l => (
+            <button
+              key={l.code}
+              onClick={() => chooseLanguage(l.code)}
+              aria-pressed={language === l.code}
+              style={{
+                padding: '8px 16px', borderRadius: 100, fontSize: 13, cursor: 'pointer',
+                border: '0.5px solid', transition: 'all 0.15s',
+                background: language === l.code ? '#EEEDFE' : 'transparent',
+                borderColor: language === l.code ? '#534AB7' : 'var(--border-strong)',
+                color: language === l.code ? '#3C3489' : 'var(--text-secondary)',
+                fontWeight: language === l.code ? 600 : 400
+              }}
+            >
+              {l.native}{l.native !== l.name ? ` · ${l.name}` : ''}
+            </button>
+          ))}
+        </div>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0 0 0' }}>The story is written and read aloud in this language.</p>
+      </section>
+      </>
+      )}
+
+      {/* Ending */}
+      <div style={{ height: '0.5px', background: 'var(--border)' }} />
+      <section>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <div style={{ width: 24, height: 24, borderRadius: '50%', background: '#534AB7', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{continuing ? 3 : 6}</div>
+          <h2 style={{ fontSize: 16, fontWeight: 600 }}>Ending</h2>
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          {[
+            { value: false, label: continuing ? 'Finish the story' : 'Happy ending', desc: continuing ? 'Wrap everything up' : 'A complete story' },
+            { value: true, label: 'To be continued…', desc: 'A cliffhanger, then continue later' },
+          ].map(o => (
+            <div
+              key={String(o.value)}
+              onClick={() => setToBeContinued(o.value)}
+              role="button"
+              aria-pressed={toBeContinued === o.value}
+              style={{
+                flex: 1, padding: '12px 10px', borderRadius: 12, textAlign: 'center', cursor: 'pointer',
+                border: `${toBeContinued === o.value ? '2px' : '0.5px'} solid ${toBeContinued === o.value ? '#534AB7' : 'var(--border)'}`,
+                background: toBeContinued === o.value ? '#EEEDFE' : 'var(--surface-card)',
+                transition: 'all 0.15s'
+              }}
+            >
+              <p style={{ fontSize: 13, fontWeight: 600, color: toBeContinued === o.value ? '#3C3489' : 'var(--text-primary)', marginBottom: 3 }}>{o.label}</p>
+              <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>{o.desc}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
       {!atLimit && storiesLeft !== null && (tier === 'free' || storiesLeft <= 3) && (
         <p style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', margin: '0 0 -12px 0' }}>
           {storiesLeft === 1
@@ -514,12 +698,26 @@ export default function Create() {
             : `${storiesLeft} of ${storyLimit} stories left this month`}
         </p>
       )}
+      {/* What is still needed, shown while anything is missing */}
+      {!atLimit && missingKeys.length > 0 && (
+        <div style={{ background: 'var(--surface-card)', border: `0.5px solid ${showMissing ? '#E24B4A' : 'var(--border)'}`, borderRadius: 12, padding: '12px 14px', marginBottom: -8 }}>
+          <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', margin: '0 0 6px 0' }}>ⓘ To create your story you need to:</p>
+          {[
+            { key: 'characters', text: 'Choose at least one character', done: !needsCharacters },
+            { key: 'prompt', text: 'Say what the story is about (a few words is enough)', done: !needsIdea },
+          ].map(item => (
+            <p key={item.key} style={{ fontSize: 13, margin: '3px 0', color: item.done ? '#1D9E75' : 'var(--text-primary)' }}>
+              {item.done ? '✓' : '○'} {item.text}
+            </p>
+          ))}
+        </div>
+      )}
       <Button
-        onClick={generate}
-        disabled={!canGenerate}
-        style={{ width: '100%', justifyContent: 'center', padding: '14px', fontSize: 15, borderRadius: 14, marginTop: 4 }}
+        onClick={onGenerateClick}
+        disabled={atLimit}
+        style={{ width: '100%', justifyContent: 'center', padding: '14px', fontSize: 15, borderRadius: 14, marginTop: 4, opacity: atLimit ? 0.5 : (canGenerate ? 1 : 0.6) }}
       >
-        {atLimit ? 'Monthly limit reached' : '✨ Generate story'}
+        {atLimit ? 'Monthly limit reached' : continuing ? '✨ Write the next chapter' : '✨ Generate story'}
       </Button>
     </div>
   )
