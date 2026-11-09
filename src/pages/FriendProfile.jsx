@@ -44,7 +44,7 @@ export default function FriendProfile() {
         supabase.from('profiles').select('id, display_name, avatar_url').eq('id', id).single(),
         supabase.from('stories')
           .select('id, owner_id, title, genre, scenes, characters, language, to_be_continued, chapter_number, created_at')
-          .eq('owner_id', id).eq('is_shared', true).order('created_at', { ascending: false })
+          .eq('owner_id', id).eq('is_shared', true).eq('in_library', true).is('deleted_at', null).order('created_at', { ascending: false })
       ])
       if (cancelled) return
       setState({ loading: false, profile, stories: (rows || []).map(fromRow).filter(isFinished), connected: true })

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useStore } from '../lib/store'
+import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../lib/AuthContext'
 import { stopAmbientSfx } from '../lib/sfx'
 import { tokenize, wordGap, buildCueTimeline } from '../lib/words'
@@ -124,7 +125,7 @@ function FinishingTouchesScreen({ title, onBack, stuck }) {
         {msg.text}
       </p>
       <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 8, textAlign: 'center', maxWidth: 280 }}>
-        {stuck ? 'Sorry about this — please go back and try creating the story again.' : title}
+        {stuck ? 'Sorry about this. Please go back and try creating the story again.' : title}
       </p>
       <button onClick={onBack} style={{ marginTop: 16, color: '#534AB7', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13 }}>← Back home</button>
     </div>
@@ -134,7 +135,7 @@ function FinishingTouchesScreen({ title, onBack, stuck }) {
 export default function StoryPlayer() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { getStory, saveStory } = useStore()
+  const { getStory, updateScenes, saveToLibrary, discardStory } = useStore()
   const { user } = useAuth()
   const [story, setStory] = useState(null)
   const [storyLoading, setStoryLoading] = useState(true)
@@ -194,6 +195,12 @@ export default function StoryPlayer() {
   const reveal = useCallback(() => { setControlsVisible(true); setRevealTick(t => t + 1) }, [])
   // The ending screen shown after the last page ("The End" or "To be continued").
   const [showEnd, setShowEnd] = useState(false)
+  // Saving to the library: a story is only kept once the person saves it.
+  const [saveState, setSaveState] = useState('idle') // 'idle' | 'saving' | 'saved' | 'error'
+  // The "save before you go?" question, with where to go afterwards.
+  const [leaveAsk, setLeaveAsk] = useState(null)
+  // The plan, only needed when the story is a one page preview behind the paywall.
+  const [tier, setTier] = useState(null)
 
   // Phone full screen ("cinema") mode, like YouTube's landscape full screen.
   // Where the phone's browser allows it (Android Chrome), this hides the
@@ -327,6 +334,12 @@ export default function StoryPlayer() {
     return () => { cancelled = true }
   }, [id])
 
+  useEffect(() => {
+    if (!story?.paywalled || !user) return
+    supabase.from('subscriptions').select('tier, status').eq('user_id', user.id).single()
+      .then(({ data }) => setTier(data?.status === 'active' ? (data.tier || 'free') : 'free'))
+  }, [story?.paywalled, user?.id])
+
   // Backfill poller: images generate asynchronously in the background and
   // are never waited on during creation, so this is the only thing that
   // patches finished images into the story as they complete. It also
@@ -375,9 +388,10 @@ export default function StoryPlayer() {
         photoMime: c.photoMime || 'image/jpeg', description: c.description || null
       }))
       try {
+        const { data: { session } } = await supabase.auth.getSession()
         await fetch('/api/submit-image-job', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
           body: JSON.stringify({
             imagePrompt: sceneData.imagePrompt, style: story.style,
             storyId: id, sceneIndex, characters: charPayload,
@@ -414,8 +428,9 @@ export default function StoryPlayer() {
           })
           if (changed) {
             const updatedStory = { ...story, scenes: updatedScenes }
-            setStory(updatedStory)
-            saveStory(updatedStory)
+            // Keep the latest saved flag, in case it changed while this ran.
+            setStory(prev => ({ ...updatedStory, inLibrary: prev?.inLibrary ?? updatedStory.inLibrary }))
+            updateScenes(id, updatedScenes)
           }
 
           // Kick off retries for any failed scenes, independent of the "are
@@ -920,7 +935,7 @@ export default function StoryPlayer() {
       {learningMode ? '🔤 Learning' : '📖 Regular'}
     </button>
   )
-  const backButton = <button onClick={() => { stopAudio(); navigate(-1) }} style={pillButton}>← Back</button>
+  const backButton = <button onClick={() => requestLeave(-1)} style={pillButton}>← Back</button>
   const fullScreenButton = (
     <button onClick={cinema ? exitCinema : enterCinema} style={pillButton}>{cinema ? '✕ Exit' : '⛶ Full screen'}</button>
   )
@@ -946,7 +961,49 @@ export default function StoryPlayer() {
   )
   const narrationLen = (current?.narration || '').length
 
-  // ---- The ending screen: "The End", or "To be continued" for a cliffhanger ----
+  // ---- Saving and leaving ----
+  // A story is only kept if the person saves it. Leaving an unsaved story asks
+  // first. A one page preview (over the monthly limit) is never kept.
+  const unsaved = isOwner && !story.inLibrary
+  const doSave = async () => {
+    if (saveState === 'saving' || story.inLibrary) return true
+    setSaveState('saving')
+    try {
+      await saveToLibrary(story.id)
+      setStory(prev => ({ ...prev, inLibrary: true }))
+      setSaveState('saved')
+      return true
+    } catch {
+      setSaveState('error')
+      return false
+    }
+  }
+  const goTo = (dest) => { if (dest === -1) navigate(-1); else navigate(dest) }
+  const requestLeave = (dest) => {
+    stopAudio()
+    if (!unsaved) { goTo(dest); return }
+    if (story.paywalled) { discardStory(story.id).catch(() => {}); goTo(dest === -1 ? '/' : dest); return }
+    setLeaveAsk(dest)
+  }
+  const leaveAfterSave = async () => { if (await doSave()) { const d = leaveAsk; setLeaveAsk(null); goTo(d === -1 ? '/profile?tab=library' : d) } }
+  const leaveWithoutSaving = () => {
+    const d = leaveAsk
+    setLeaveAsk(null)
+    // A to be continued story can still be picked up from the home page for a few
+    // days. Any other unsaved story is removed straight away.
+    if (!story.toBeContinued) discardStory(story.id).catch(() => {})
+    goTo(d === -1 ? '/' : d)
+  }
+
+  const savePill = unsaved && !story.paywalled ? (
+    <button onClick={doSave} disabled={saveState === 'saving'} style={{ ...pillButton, background: 'rgba(29,158,117,0.22)', border: '0.5px solid rgba(29,158,117,0.7)', color: '#8be6c2' }}>
+      {saveState === 'saving' ? 'Saving…' : '💾 Save'}
+    </button>
+  ) : (isOwner && story.inLibrary && saveState === 'saved' ? (
+    <span style={{ ...pillButton, border: 'none', background: 'none', color: '#8be6c2' }}>✓ Saved</span>
+  ) : null)
+
+  // ---- The ending screen: "The End", "To be continued", or the paywall ----
   const tbc = !!story.toBeContinued
   const endButton = (primary) => ({
     width: '100%', padding: '13px 16px', borderRadius: 12, fontSize: 15, fontWeight: 600, cursor: 'pointer',
@@ -954,24 +1011,83 @@ export default function StoryPlayer() {
     background: primary ? '#534AB7' : 'rgba(255,255,255,0.08)',
     color: 'white'
   })
-  const endCard = (
+  const resetLabel = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1))
+    .toLocaleDateString('en-AU', { day: 'numeric', month: 'long', timeZone: 'UTC' })
+  const endShell = (children) => (
     <div style={{ position: 'absolute', inset: 0, zIndex: 20, background: 'rgba(5,4,12,0.88)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, overflowY: 'auto', animation: 'fadeIn 0.5s ease' }}>
       <div style={{ width: '100%', maxWidth: 360, textAlign: 'center' }}>
         <button onClick={() => setShowEnd(false)} aria-label="Close" style={{ position: 'absolute', top: 12, right: 14, background: 'none', border: 'none', color: 'rgba(255,255,255,0.6)', fontSize: 22, cursor: 'pointer' }}>✕</button>
-        <p style={{ margin: '0 0 6px 0', fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: 'rgba(255,255,255,0.55)' }}>
-          {story.title}{story.chapterNumber > 1 ? ` · Chapter ${story.chapterNumber}` : ''}
-        </p>
-        <p style={{ margin: '0 0 22px 0', fontSize: 34, fontWeight: 700, color: '#fff', fontFamily: 'Georgia, serif' }}>
-          {tbc ? 'To be continued…' : 'The End'}
+        {children}
+      </div>
+    </div>
+  )
+
+  // The paywall: the first page was free, the rest needs a plan.
+  const paywallCard = endShell(
+    <>
+      <p style={{ margin: '0 0 6px 0', fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: 'rgba(255,255,255,0.55)' }}>{story.title}</p>
+      <p style={{ margin: '0 0 10px 0', fontSize: 30, fontWeight: 700, color: '#fff', fontFamily: 'Georgia, serif', lineHeight: 1.25 }}>The adventure is just beginning</p>
+      <p style={{ margin: '0 0 22px 0', fontSize: 14, lineHeight: 1.6, color: 'rgba(255,255,255,0.75)' }}>
+        {tier === 'tier2'
+          ? `You have used all the stories in your plan this month. They reset on ${resetLabel}.`
+          : 'You have used all your stories this month. Upgrade to read the rest of this adventure and keep creating new ones.'}
+      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {tier !== 'tier2' && (
+          <button onClick={() => { stopAudio(); discardStory(story.id).catch(() => {}); navigate('/profile?tab=plan') }} style={endButton(true)}>⭐ See plans and upgrade</button>
+        )}
+        <button onClick={() => { setShowEnd(false); stopAudio(); setScene(0) }} style={endButton(false)}>↻ Read the first page again</button>
+        <button onClick={() => requestLeave('/')} style={endButton(false)}>Back home</button>
+      </div>
+    </>
+  )
+
+  const endCard = story.paywalled ? paywallCard : endShell(
+    <>
+      <p style={{ margin: '0 0 6px 0', fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: 'rgba(255,255,255,0.55)' }}>
+        {story.title}{story.chapterNumber > 1 ? ` · Chapter ${story.chapterNumber}` : ''}
+      </p>
+      <p style={{ margin: '0 0 22px 0', fontSize: 34, fontWeight: 700, color: '#fff', fontFamily: 'Georgia, serif' }}>
+        {tbc ? 'To be continued…' : 'The End'}
+      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {unsaved && (
+          <button onClick={doSave} disabled={saveState === 'saving'} style={{ ...endButton(true), background: '#1D9E75' }}>
+            {saveState === 'saving' ? 'Saving…' : '💾 Save to library'}
+          </button>
+        )}
+        {isOwner && story.inLibrary && (
+          <p style={{ margin: '0 0 2px 0', fontSize: 13, color: '#8be6c2' }}>✓ Saved to your library</p>
+        )}
+        {saveState === 'error' && <p style={{ margin: 0, fontSize: 13, color: '#ff9b9b' }}>Could not save. Please try again.</p>}
+        {tbc && isOwner && (
+          <button onClick={() => { stopAudio(); navigate(`/create?continue=${story.id}`) }} style={endButton(!unsaved)}>✨ Continue the story</button>
+        )}
+        <button onClick={() => { setShowEnd(false); stopAudio(); setScene(0) }} style={endButton(false)}>↻ Read again</button>
+        {isOwner && <button onClick={() => { stopAudio(); navigate(`/story/${story.id}/print`) }} style={endButton(false)}>📖 Export as a book</button>}
+        {unsaved
+          ? <button onClick={() => requestLeave('/')} style={{ ...endButton(false), background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.6)', fontSize: 14, fontWeight: 500 }}>{tbc ? 'Leave for now' : "Don't save"}</button>
+          : <button onClick={() => requestLeave(isOwner ? '/profile?tab=library' : -1)} style={endButton(false)}>{isOwner ? 'Back to my library' : '← Back'}</button>}
+      </div>
+    </>
+  )
+
+  // Asked when someone leaves a story they have not saved.
+  const leaveDialog = leaveAsk !== null && (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 30, background: 'rgba(5,4,12,0.82)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div style={{ width: '100%', maxWidth: 340, background: '#1a1830', border: '0.5px solid rgba(255,255,255,0.2)', borderRadius: 18, padding: '22px 20px', textAlign: 'center' }}>
+        <p style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 700, color: '#fff' }}>Save this story?</p>
+        <p style={{ margin: '0 0 18px', fontSize: 14, lineHeight: 1.55, color: 'rgba(255,255,255,0.72)' }}>
+          {tbc
+            ? 'It is not in your library yet. You can still pick it up from the home page for a few days, but it is only kept for good if you save it.'
+            : 'If you leave without saving, this story will be gone for good.'}
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {tbc && isOwner && (
-            <button onClick={() => { stopAudio(); navigate(`/create?continue=${story.id}`) }} style={endButton(true)}>✨ Continue the story</button>
-          )}
-          <button onClick={() => { setShowEnd(false); stopAudio(); setScene(0) }} style={endButton(!(tbc && isOwner))}>↻ Read again</button>
-          {isOwner && <button onClick={() => { stopAudio(); navigate(`/story/${story.id}/print`) }} style={endButton(false)}>🖨 Print or save as a book</button>}
-          <button onClick={() => { stopAudio(); isOwner ? navigate('/profile?tab=library') : navigate(-1) }} style={endButton(false)}>{isOwner ? 'Back to my library' : '← Back'}</button>
+          <button onClick={leaveAfterSave} disabled={saveState === 'saving'} style={{ ...endButton(true), background: '#1D9E75' }}>{saveState === 'saving' ? 'Saving…' : '💾 Save and leave'}</button>
+          <button onClick={leaveWithoutSaving} style={endButton(false)}>{tbc ? 'Leave without saving' : 'Leave without saving'}</button>
+          <button onClick={() => setLeaveAsk(null)} style={{ ...endButton(false), background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.6)', fontWeight: 500 }}>Keep reading</button>
         </div>
+        {saveState === 'error' && <p style={{ margin: '12px 0 0', fontSize: 13, color: '#ff9b9b' }}>Could not save. Please try again.</p>}
       </div>
     </div>
   )
@@ -989,6 +1105,7 @@ export default function StoryPlayer() {
       <div style={rootStyle} {...rootProps}>
         {keyframes}
         {showEnd && endCard}
+        {leaveDialog}
         {backdrop}
         {barHintPill}
         <div style={{ position: 'relative', width: imgW, height: '100%', flexShrink: 0, background: '#1a1830', overflow: 'hidden' }}>
@@ -998,6 +1115,7 @@ export default function StoryPlayer() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, minHeight: 36, ...ctlStyle }}>
             {!cinema && backButton}
             <div style={{ flex: 1 }} />
+            {savePill}
             {learningPill}
             {fullScreenButton}
           </div>
@@ -1026,11 +1144,13 @@ export default function StoryPlayer() {
     <div style={{ ...rootStyle, flexDirection: 'column', paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }} {...rootProps}>
       {keyframes}
       {showEnd && endCard}
+      {leaveDialog}
       {backdrop}
       {barHintPill}
       <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', flexShrink: 0, background: 'rgba(0,0,0,0.35)', ...ctlStyle }}>
         {backButton}
         <p style={{ flex: 1, minWidth: 0, margin: 0, fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.9)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{story.title}</p>
+        {savePill}
         {learningPill}
         {fullScreenButton}
       </div>

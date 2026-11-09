@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../lib/AuthContext'
-import { useStore } from '../lib/store'
+import { useStore, libraryOf, deletedOf, continuedIdsOf, usedThisMonthOf, daysLeftOf, DELETED_KEEP_DAYS } from '../lib/store'
+import { normalisePhone, PHONE_HELP } from '../lib/phone'
+import StoryCover from '../components/StoryCover'
 import { Avatar } from '../components/UI'
 import LibraryGrid from '../components/LibraryGrid'
 import FriendsPanel from '../components/FriendsPanel'
@@ -23,6 +25,7 @@ const COMPARE_ROWS = [
   { label: 'Characters', free: '2', tier1: '6', tier2: 'Unlimited' },
   { label: 'Art styles', free: '2', tier1: 'All 6', tier2: 'All 6' },
   { label: 'Share with friends', free: '✕', tier1: '✓', tier2: '✓' },
+  { label: 'Stories from your own pictures', free: '✕', tier1: '✕', tier2: '✓' },
 ]
 
 // The plan and billing section (the old Profile page), now one tab of the new Profile.
@@ -76,10 +79,8 @@ function PlanPanel() {
   const tier = subscription?.status === 'active' ? (subscription?.tier || 'free') : 'free'
   const info = TIER_INFO[tier]
 
-  const startOfMonth = new Date()
-  startOfMonth.setDate(1)
-  startOfMonth.setHours(0, 0, 0, 0)
-  const storiesThisMonth = stories.filter(s => new Date(s.createdAt) >= startOfMonth).length
+  // Counted the way the server counts: drafts and deleted stories count, one page previews do not.
+  const storiesThisMonth = usedThisMonthOf(stories)
   const ownCharacterCount = characters.filter(c => c.ownerId === user.id).length
 
   const handleUpgrade = async (targetTier) => {
@@ -116,12 +117,12 @@ function PlanPanel() {
             ? '⏳ Confirming your subscription…'
             : (subscription?.tier === 'tier1' || subscription?.tier === 'tier2')
               ? '🎉 Subscription active!'
-              : "Payment succeeded, but confirming your plan is taking longer than expected — try refreshing this page in a moment, or contact support if it doesn't update."}
+              : "Payment succeeded, but confirming your plan is taking longer than expected. Try refreshing this page in a moment, or contact support if it doesn't update."}
         </div>
       )}
       {checkoutResult === 'cancelled' && (
         <div style={{ padding: '10px 14px', borderRadius: 10, background: 'var(--surface-card)', color: 'var(--text-muted)', fontSize: 13, marginBottom: 16 }}>
-          Checkout was cancelled — no charge was made.
+          Checkout was cancelled. No charge was made.
         </div>
       )}
 
@@ -132,7 +133,7 @@ function PlanPanel() {
           <div style={{ padding: 16, borderRadius: 12, background: 'var(--surface-card)', marginBottom: 16 }}>
             <p style={{ fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-muted)', margin: '0 0 4px' }}>Current plan</p>
             <p style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 12px' }}>
-              {info.name}{info.price ? ` — ${info.price}` : ''}
+              {info.name}{info.price ? `, ${info.price}` : ''}
             </p>
 
             <div style={{ marginBottom: 10 }}>
@@ -189,12 +190,12 @@ function PlanPanel() {
           {tier === 'free' ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <button onClick={() => handleUpgrade('tier1')} disabled={actionLoading} style={{ padding: '12px 14px', borderRadius: 10, fontSize: 14, fontWeight: 600, background: '#534AB7', color: 'white', border: 'none', cursor: 'pointer' }}>
-                Upgrade to Tier 1 — $19.99/mo
+                Upgrade to Tier 1: $19.99/mo
                 <span style={{ display: 'block', fontSize: 12, fontWeight: 400, opacity: 0.85, marginTop: 2 }}>25 stories a month, 6 characters, all art styles, friend sharing</span>
               </button>
               <button onClick={() => handleUpgrade('tier2')} disabled={actionLoading} style={{ padding: '12px 14px', borderRadius: 10, fontSize: 14, fontWeight: 600, background: 'var(--surface-card)', color: 'var(--text-primary)', border: '0.5px solid var(--border)', cursor: 'pointer' }}>
-                Upgrade to Tier 2 — $39.99/mo
-                <span style={{ display: 'block', fontSize: 12, fontWeight: 400, color: 'var(--text-muted)', marginTop: 2 }}>Up to ~200 stories a month, unlimited characters, everything in Tier 1</span>
+                Upgrade to Tier 2: $39.99/mo
+                <span style={{ display: 'block', fontSize: 12, fontWeight: 400, color: 'var(--text-muted)', marginTop: 2 }}>Up to ~200 stories a month, unlimited characters, stories from your own pictures, everything in Tier 1</span>
               </button>
             </div>
           ) : (
@@ -214,7 +215,8 @@ function PlanPanel() {
 const TABS = [
   { id: 'library', label: 'Library' },
   { id: 'friends', label: 'Friends' },
-  { id: 'photos', label: 'Photos' },
+  { id: 'avatars', label: 'Avatars' },
+  { id: 'deleted', label: 'Deleted' },
   { id: 'plan', label: 'Plan' },
 ]
 
@@ -229,12 +231,34 @@ const tabButton = (active) => ({
 
 export default function Profile() {
   const { user, logout } = useAuth()
-  const { stories, characters, deleteStory } = useStore()
+  const stories = useStore(s => s.stories)
+  const characters = useStore(s => s.characters)
+  const deleteStory = useStore(s => s.deleteStory)
+  const restoreStory = useStore(s => s.restoreStory)
+  const deleteStoryForever = useStore(s => s.deleteStoryForever)
+  const library = libraryOf(stories)
+  const deleted = deletedOf(stories)
+  const continuedIds = continuedIdsOf(stories)
+  // A short "moved to Deleted, undo" message after deleting a story.
+  const [toast, setToast] = useState(null)
+  const toastTimer = React.useRef(null)
+  const moveToDeleted = async (id) => {
+    const story = library.find(x => x.id === id)
+    try { await deleteStory(id) } catch { alert('Could not delete the story. Please try again.'); return }
+    setToast({ id, title: story?.title || 'Story' })
+    clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToast(null), 7000)
+  }
+  const undoDelete = async () => {
+    if (!toast) return
+    try { await restoreStory(toast.id) } catch { alert('Could not restore the story.') }
+    setToast(null)
+  }
   const [searchParams, setSearchParams] = useSearchParams()
 
   // Coming back from checkout lands on the Plan tab. Otherwise the Library opens first.
   const requested = searchParams.get('tab')
-  const tab = TABS.some(t => t.id === requested) ? requested : (searchParams.get('checkout') ? 'plan' : 'library')
+  const tab = TABS.some(t => t.id === requested || (requested === 'photos' && t.id === 'avatars')) ? (requested === 'photos' ? 'avatars' : requested) : (searchParams.get('checkout') ? 'plan' : 'library')
   const goTab = (id) => setSearchParams(id === 'library' ? {} : { tab: id }, { replace: true })
 
   const [displayName, setDisplayName] = useState(null) // null until loaded
@@ -242,11 +266,26 @@ export default function Profile() {
   const [draftName, setDraftName] = useState('')
   const [savingName, setSavingName] = useState(false)
   const [nameError, setNameError] = useState(null)
+  const [phone, setPhone] = useState(null)
+  const [editingPhone, setEditingPhone] = useState(false)
+  const [draftPhone, setDraftPhone] = useState('')
+  const [phoneError, setPhoneError] = useState(null)
 
   useEffect(() => {
-    supabase.from('profiles').select('display_name').eq('id', user.id).single()
-      .then(({ data }) => setDisplayName(data?.display_name || user.email.split('@')[0]))
+    supabase.from('profiles').select('display_name, phone').eq('id', user.id).single()
+      .then(({ data }) => { setDisplayName(data?.display_name || user.email.split('@')[0]); setPhone(data?.phone || null) })
   }, [user.id])
+
+  const savePhone = async () => {
+    const next = normalisePhone(draftPhone)
+    if (!next) { setPhoneError(`That does not look like a mobile number. ${PHONE_HELP}`); return }
+    const { error } = await supabase.from('profiles').update({ phone: next }).eq('id', user.id)
+    if (error) { setPhoneError('Could not save your number. Please try again.'); return }
+    setPhone(next)
+    setEditingPhone(false)
+    setPhoneError(null)
+    supabase.rpc('claim_invites')
+  }
 
   const saveName = async () => {
     const name = draftName.trim()
@@ -261,7 +300,7 @@ export default function Profile() {
   }
 
   const ownPhotos = characters
-    .filter(c => c.ownerId === user.id && c.photoUrl)
+    .filter(c => c.ownerId === user.id && c.photoUrl && c.photoUrl.includes('/avatars/'))
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
 
   const shownName = displayName || user.email.split('@')[0]
@@ -293,6 +332,23 @@ export default function Profile() {
                 <button onClick={() => { setDraftName(shownName); setNameError(null); setEditing(true) }} style={{ background: 'none', border: 'none', color: '#534AB7', fontSize: 12, cursor: 'pointer', padding: 0 }}>Edit name</button>
               </div>
               <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '2px 0 0' }}>{user.email}</p>
+              {editingPhone ? (
+                <div style={{ marginTop: 6 }}>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input autoFocus type="tel" value={draftPhone} onChange={(e) => setDraftPhone(e.target.value)} placeholder="Mobile number"
+                      onKeyDown={(e) => { if (e.key === 'Enter') savePhone(); if (e.key === 'Escape') setEditingPhone(false) }}
+                      style={{ flex: 1, minWidth: 0, padding: '6px 10px', borderRadius: 8, fontSize: 13, border: '0.5px solid var(--border)', background: 'var(--surface-input)', color: 'var(--text-primary)' }} />
+                    <button onClick={savePhone} style={{ padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600, background: '#534AB7', color: 'white', border: 'none', cursor: 'pointer' }}>Save</button>
+                    <button onClick={() => { setEditingPhone(false); setPhoneError(null) }} style={{ padding: '6px 8px', fontSize: 12, background: 'none', color: 'var(--text-muted)', border: 'none', cursor: 'pointer' }}>Cancel</button>
+                  </div>
+                  {phoneError && <p style={{ fontSize: 12, color: '#E24B4A', margin: '4px 0 0' }}>{phoneError}</p>}
+                </div>
+              ) : (
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '2px 0 0' }}>
+                  {phone || 'No mobile number'}{' '}
+                  <button onClick={() => { setDraftPhone(phone || ''); setPhoneError(null); setEditingPhone(true) }} style={{ background: 'none', border: 'none', color: '#534AB7', fontSize: 12, cursor: 'pointer', padding: 0 }}>Edit</button>
+                </p>
+              )}
             </>
           )}
         </div>
@@ -301,38 +357,38 @@ export default function Profile() {
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, overflowX: 'auto', paddingBottom: 2 }}>
         {TABS.map(t => (
           <button key={t.id} onClick={() => goTab(t.id)} aria-pressed={tab === t.id} style={tabButton(tab === t.id)}>
-            {t.label}{t.id === 'library' && stories.length > 0 ? ` (${stories.length})` : ''}
+            {t.label}{t.id === 'library' && library.length > 0 ? ` (${library.length})` : ''}{t.id === 'deleted' && deleted.length > 0 ? ` (${deleted.length})` : ''}
           </button>
         ))}
       </div>
 
       {tab === 'library' && (
-        stories.length === 0 ? (
+        library.length === 0 ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '40px 20px', textAlign: 'center' }}>
             <p style={{ fontSize: 36, margin: 0 }}>📚</p>
             <p style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>Your library is empty</p>
-            <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, margin: 0 }}>Stories you make are saved here automatically.</p>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, margin: 0 }}>Stories you save appear here. When a story ends, choose Save to library.</p>
             <Link to="/create" style={{ color: '#534AB7', fontSize: 14 }}>Create your first story →</Link>
           </div>
         ) : (
-          <LibraryGrid stories={stories} owner onDelete={deleteStory} newStoryTile />
+          <LibraryGrid stories={library} owner onDelete={moveToDeleted} continuedIds={continuedIds} newStoryTile />
         )
       )}
 
       {tab === 'friends' && <FriendsPanel />}
 
-      {tab === 'photos' && (
+      {tab === 'avatars' && (
         ownPhotos.length === 0 ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '40px 20px', textAlign: 'center' }}>
-            <p style={{ fontSize: 36, margin: 0 }}>🖼️</p>
-            <p style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>No photos yet</p>
-            <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, margin: 0, maxWidth: 320 }}>Photos you add to your characters appear here.</p>
+            <p style={{ fontSize: 36, margin: 0 }}>🎨</p>
+            <p style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>No portraits yet</p>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, margin: 0, maxWidth: 320 }}>When you add a photo to a character, we turn it into a cartoon portrait. The portraits appear here.</p>
             <Link to="/characters?new=1" style={{ color: '#534AB7', fontSize: 14 }}>Add a character →</Link>
           </div>
         ) : (
           <>
             <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 14px' }}>
-              Photos you have added to your characters. Only you can see this page.
+              The cartoon portraits of your characters. We do not keep the photos they were made from.
             </p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 12 }}>
               {ownPhotos.map(c => (
@@ -349,7 +405,52 @@ export default function Profile() {
         )
       )}
 
+      {tab === 'deleted' && (
+        deleted.length === 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '40px 20px', textAlign: 'center' }}>
+            <p style={{ fontSize: 36, margin: 0 }}>🗑️</p>
+            <p style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>No deleted stories</p>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, margin: 0, maxWidth: 320 }}>
+              A story you delete waits here for {DELETED_KEEP_DAYS} days, so you can bring it back. After that it is removed for good.
+            </p>
+          </div>
+        ) : (
+          <>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 14px', lineHeight: 1.5 }}>
+              Deleted stories are removed for good after {DELETED_KEEP_DAYS} days. Restore a story to put it back in your library.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {deleted.map(s => {
+                const left = daysLeftOf(s)
+                return (
+                  <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'var(--surface-card)', border: '0.5px solid var(--border)', borderRadius: 14, padding: 10 }}>
+                    <div style={{ width: 72, flexShrink: 0, borderRadius: 10, overflow: 'hidden' }}><StoryCover story={s} titleSize={0} /></div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 14, fontWeight: 600, margin: '0 0 2px', color: 'var(--text-primary)' }}>{s.title}</p>
+                      <p style={{ fontSize: 12, color: left <= 3 ? '#B26A00' : 'var(--text-muted)', margin: '0 0 8px' }}>
+                        {left === 0 ? 'Removed soon' : `Removed for good in ${left} ${left === 1 ? 'day' : 'days'}`}
+                      </p>
+                      <div style={{ display: 'flex', gap: 14 }}>
+                        <button onClick={() => restoreStory(s.id).catch(() => alert('Could not restore the story.'))} style={{ background: '#534AB7', color: 'white', border: 'none', borderRadius: 100, padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Restore</button>
+                        <button onClick={() => { if (confirm(`Delete "${s.title}" for good? This cannot be undone.`)) deleteStoryForever(s.id).catch(() => alert('Could not delete the story.')) }} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer', padding: 0 }}>Delete for good</button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </>
+        )
+      )}
+
       {tab === 'plan' && <PlanPanel />}
+
+      {toast && (
+        <div style={{ position: 'fixed', left: 16, right: 16, bottom: 'calc(72px + env(safe-area-inset-bottom, 0px))', maxWidth: 420, margin: '0 auto', zIndex: 200, background: '#26215C', color: 'white', borderRadius: 12, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12, boxShadow: '0 6px 24px rgba(0,0,0,0.3)' }}>
+          <span style={{ flex: 1, fontSize: 13, lineHeight: 1.4 }}>"{toast.title}" moved to Deleted.</span>
+          <button onClick={undoDelete} style={{ background: 'none', border: 'none', color: '#C9C5F4', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Undo</button>
+        </div>
+      )}
 
       <button onClick={logout} style={{ marginTop: 28, background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 13, cursor: 'pointer' }}>
         Log out

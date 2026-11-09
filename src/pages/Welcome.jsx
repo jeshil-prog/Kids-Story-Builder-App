@@ -4,9 +4,9 @@ import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../lib/AuthContext'
 
 const PLANS = [
-  { id: 'free', name: 'Free', price: '$0', blurb: '3 stories/month, 2 characters, core styles' },
-  { id: 'tier1', name: 'Tier 1', price: '$19.99/mo', blurb: '25 stories/month, 6 characters, all styles, friend sharing' },
-  { id: 'tier2', name: 'Tier 2', price: '$39.99/mo', blurb: 'Unlimited stories, unlimited characters, all styles, friend sharing' }
+  { id: 'free', name: 'Free', price: '$0', blurb: '3 stories a month, 2 characters, 2 art styles' },
+  { id: 'tier1', name: 'Tier 1', price: '$19.99/mo', blurb: '25 stories a month, 6 characters, all styles, friend sharing' },
+  { id: 'tier2', name: 'Tier 2', price: '$39.99/mo', blurb: 'Up to about 200 stories a month, unlimited characters, all styles, friend sharing, stories from your own pictures' }
 ]
 
 export default function Welcome() {
@@ -42,7 +42,7 @@ export default function Welcome() {
     }
     if (!updated || updated.length === 0) {
       console.error('Onboarding update matched zero rows — likely blocked by RLS.', { userId: user.id })
-      alert('Could not save your plan choice (permission issue) — please refresh and try again, or let the developer know.')
+      alert('Could not save your plan choice (permission issue). Please refresh and try again, or let the developer know.')
       setSubmitting(false)
       return
     }
@@ -68,7 +68,7 @@ export default function Welcome() {
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
           <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#534AB7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, margin: '0 auto 16px' }}>🌙</div>
           <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 6px' }}>Welcome to StoryDream!</h1>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>Choose a plan to get started — you can change this anytime.</p>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>Choose a plan to get started. You can change this anytime.</p>
         </div>
 
         {PLANS.map(p => (
@@ -79,7 +79,7 @@ export default function Welcome() {
           }}>
             <input type="radio" name="plan" checked={plan === p.id} onChange={() => setPlan(p.id)} style={{ marginTop: 4 }} />
             <div>
-              <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{p.name} — {p.price}</p>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{p.name}, {p.price}</p>
               <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>{p.blurb}</p>
             </div>
           </label>

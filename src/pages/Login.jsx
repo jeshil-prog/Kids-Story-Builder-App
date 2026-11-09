@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Navigate, Link } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
+import { normalisePhone, PHONE_HELP } from '../lib/phone'
 
 const inputStyle = {
   width: '100%', padding: '12px 14px', borderRadius: 10, fontSize: 14,
@@ -15,6 +16,7 @@ export default function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [phone, setPhone] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [localError, setLocalError] = useState(null)
   const [done, setDone] = useState(null) // 'confirm' | 'reset'
@@ -31,13 +33,14 @@ export default function Login() {
     if (mode === 'signup') {
       if (password.length < 8) { setLocalError('Your password needs at least 8 characters.'); return }
       if (password !== confirmPassword) { setLocalError('The two passwords do not match.'); return }
+      if (!normalisePhone(phone)) { setLocalError(`Please enter a valid mobile number. ${PHONE_HELP}`); return }
     }
 
     setSubmitting(true)
     if (mode === 'signin') {
       await signIn(email.trim(), password)
     } else if (mode === 'signup') {
-      const result = await signUp(email.trim(), password)
+      const result = await signUp(email.trim(), password, normalisePhone(phone))
       if (result === 'confirm') setDone('confirm')
     } else {
       const ok = await sendPasswordReset(email.trim())
@@ -68,7 +71,7 @@ export default function Login() {
         ) : (
           <>
             <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 24px', lineHeight: 1.6 }}>
-              {mode === 'forgot' ? 'Enter your email and we will send you a link to set a new password.' : 'Personalised bedtime stories starring your family.'}
+              {mode === 'forgot' ? 'Enter your email and we will send you a link to set a new password.' : 'Personalised stories starring your family.'}
             </p>
 
             {mode !== 'forgot' && (
@@ -113,6 +116,15 @@ export default function Login() {
                   placeholder={mode === 'signup' ? 'Create a password (at least 8 characters)' : 'Password'}
                   style={inputStyle}
                 />
+              )}
+              {mode === 'signup' && (
+                <>
+                  <input
+                    type="tel" required autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)}
+                    placeholder="Mobile number" style={{ ...inputStyle, marginBottom: 4 }}
+                  />
+                  <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 10px', lineHeight: 1.5 }}>Friends can find you with it. It is not shown to anyone. {PHONE_HELP}</p>
+                </>
               )}
               {mode === 'signup' && (
                 <input

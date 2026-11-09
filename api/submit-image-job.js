@@ -17,15 +17,24 @@ export const config = { maxDuration: 60 }
 import { redisSet, redisGet } from './_lib/redis.js'
 import { submitImageJob } from './_lib/imageJob.js'
 import { generateNarrationAudio } from './_lib/narrationJob.js'
+import { getUserId } from './_lib/authUser.js'
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  const { imagePrompt, style, characters, storyId, sceneIndex, narrationText, language } = req.body
+  // Only signed in people can start (paid for) image and voice jobs.
+  const userId = await getUserId(req)
+  if (!userId) return res.status(401).json({ error: 'Not authenticated' })
+
+  const { imagePrompt, style, characters, storyId, sceneIndex, narrationText, language, sceneImage } = req.body
 
   if (!storyId || sceneIndex === undefined) {
     return res.status(400).json({ error: 'Missing storyId or sceneIndex' })
   }
+  // A picture the person supplied for this page (Tier 2). Kept small on purpose.
+  const cleanSceneImage = sceneImage && typeof sceneImage.base64 === 'string' && sceneImage.base64.length <= 450000
+    ? { base64: sceneImage.base64, mime: sceneImage.mime === 'image/png' ? 'image/png' : 'image/jpeg' }
+    : null
 
   const imageKey = `story:${storyId}:scene:${sceneIndex}`
   const audioKey = `story:${storyId}:scene:${sceneIndex}:audio`
@@ -38,7 +47,7 @@ export default async function handler(req, res) {
 
     const imageJobPromise = imageAlreadyDone
       ? Promise.resolve({ id: null, status: 'already_done' })
-      : submitImageJob({ imagePrompt, style, characters, storyId, sceneIndex })
+      : submitImageJob({ imagePrompt, style, characters, storyId, sceneIndex, sceneImage: cleanSceneImage })
 
     // Only (re)generate narration if it doesn't already exist — this matters
     // for the backfill poller's retry path, which resubmits this whole

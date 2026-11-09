@@ -50,15 +50,16 @@ export function AuthProvider({ children }) {
     return 'ok'
   }
 
+  // The phone number (already in international format) is stored with the new account.
   // Returns 'confirm' when a confirmation email was sent, 'ok' when the
   // account is signed in straight away (only if email confirmation is turned
   // off in Supabase), or false on failure.
-  const signUp = async (email, password) => {
+  const signUp = async (email, password, phone) => {
     setAuthError(null)
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: window.location.origin }
+      options: { emailRedirectTo: window.location.origin, data: { phone: phone || null } }
     })
     if (error) { setAuthError(friendlyError(error)); return false }
     // Supabase hides whether an email is already registered by returning a

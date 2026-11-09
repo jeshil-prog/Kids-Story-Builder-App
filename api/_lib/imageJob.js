@@ -15,7 +15,12 @@ const STYLE_PROMPTS = {
 // Submits (or re-submits, on rate-limit retry) a single scene's image job.
 // Stores the original params alongside the job mapping so a rate-limited
 // job can retry itself later without needing the client to resend anything.
-export async function submitImageJob({ imagePrompt, style, characters, storyId, sceneIndex }) {
+//
+// sceneImage (Tier 2 only): a picture the person supplied for this page. It is
+// used only as a guide for the illustration, and it is never stored by us. It
+// travels with the job parameters in Redis, which expire after an hour, so a
+// retry can still use it.
+export async function submitImageJob({ imagePrompt, style, characters, storyId, sceneIndex, sceneImage }) {
   const styleDesc = STYLE_PROMPTS[style] || "children's book illustration, warm and magical"
   const namedChars = (characters || []).filter((c) => c.name)
   // photoBase64 (in-memory, current session only) is preferred when present
@@ -30,18 +35,6 @@ export async function submitImageJob({ imagePrompt, style, characters, storyId, 
     .map((c) => `${c.name}: ${c.description}`)
     .join('\n')
 
-  // Always emitted, not just when a text description happens to exist — a
-  // character with no description had nothing but the reference photo
-  // itself telling the model what it actually is, which is exactly the
-  // condition under which an image model is most likely to drift toward a
-  // generic default (a human child protagonist is an extremely common
-  // default in children's-book training data), especially for a non-human
-  // character. This makes the instruction explicit regardless of whether a
-  // text description is available to reinforce it.
-  const speciesGuard = charsWithPhotos.length > 0
-    ? `CRITICAL — EXACT CHARACTER MATCH REQUIRED: Every character with an attached reference photo above MUST be drawn as EXACTLY what that photo shows — same species/type (if the reference is an animal, draw an animal; never substitute a human child), same breed/build, same coloring and markings, same distinguishing features. Do not reinterpret, humanize, or default to a generic child character under any circumstances — match the reference photo exactly.`
-    : ''
-
   const fullPrompt = `${styleDesc} children's picture book full-page illustration.
 
 THE SCENE:
@@ -49,7 +42,8 @@ ${imagePrompt}
 
 ${charNames ? `CHARACTERS IN THIS SCENE: ${charNames}.` : ''}
 ${charDescriptions ? `CHARACTER APPEARANCES (preserve exactly):\n${charDescriptions}` : ''}
-${speciesGuard}
+
+${sceneImage ? 'The LAST reference image is the picture this page is based on. Keep its people, place, objects and composition, but redraw everything in the illustration style above.\n' : ''}${charsWithPhotos.length ? 'REFERENCE IMAGES show how the characters look. Use them only for the faces, hair and features. Always draw in the illustration style above, never in the style of a reference image.' : ''}
 
 STYLE RULES: Wide cinematic composition. Rich detailed environment. Characters integrated naturally into the scene. Warm, joyful, magical atmosphere. No text or words in the image. Child-safe.`
 
@@ -61,6 +55,10 @@ STYLE RULES: Wide cinematic composition. Rich detailed environment. Characters i
     } else if (char.photoUrl) {
       content.push({ type: 'input_image', image_url: char.photoUrl })
     }
+  }
+
+  if (sceneImage?.base64) {
+    content.push({ type: 'input_image', image_url: `data:${sceneImage.mime || 'image/jpeg'};base64,${sceneImage.base64}` })
   }
 
   const response = await openai.responses.create({
@@ -76,7 +74,7 @@ STYLE RULES: Wide cinematic composition. Rich detailed environment. Characters i
   // gpt-image ever takes even with a retry added in.
   await redisSet(
     `openai_job:${response.id}`,
-    { storyId, sceneIndex, originalParams: { imagePrompt, style, characters, storyId, sceneIndex } },
+    { storyId, sceneIndex, originalParams: { imagePrompt, style, characters, storyId, sceneIndex, sceneImage } },
     3600
   )
 

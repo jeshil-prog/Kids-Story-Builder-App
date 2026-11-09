@@ -8,6 +8,7 @@ import Library from './pages/Library'
 import Login from './pages/Login'
 import Welcome from './pages/Welcome'
 import ResetPassword from './pages/ResetPassword'
+import AddPhone from './pages/AddPhone'
 import FriendProfile from './pages/FriendProfile'
 import PrintBook from './pages/PrintBook'
 import Friends from './pages/Friends'
@@ -28,7 +29,8 @@ function FullPageSpinner() {
 }
 
 // Wraps every real page. Redirects to /login if there's no session, sends
-// first-time users to /welcome to pick a plan before anything else, and
+// people without a mobile number to /add-phone, first-time users to /welcome
+// to pick a plan before anything else, and
 // waits for the store's Supabase-backed character/story data to finish
 // loading before rendering children — every page was originally built
 // assuming that data was already synchronously present from localStorage on
@@ -38,7 +40,8 @@ function RequireAuth({ children }) {
   const init = useStore(s => s.init)
   const initialized = useStore(s => s.initialized)
   const storeUserId = useStore(s => s.userId)
-  const [onboarded, setOnboarded] = React.useState(undefined) // undefined = not checked yet
+  // undefined = not checked yet. Otherwise { onboarded, phone } from the person's profile.
+  const [gate, setGate] = React.useState(undefined)
 
   React.useEffect(() => {
     if (!loading && user && storeUserId !== user.id) {
@@ -48,14 +51,17 @@ function RequireAuth({ children }) {
 
   React.useEffect(() => {
     if (loading || !user) return
-    supabase.from('profiles').select('onboarded').eq('id', user.id).single()
-      .then(({ data }) => setOnboarded(!!data?.onboarded))
+    supabase.from('profiles').select('onboarded, phone').eq('id', user.id).single()
+      .then(({ data }) => setGate({ onboarded: !!data?.onboarded, phone: data?.phone || null }))
   }, [loading, user])
 
   if (loading) return <FullPageSpinner />
   if (!user) return <Navigate to="/login" replace />
-  if (onboarded === undefined) return <FullPageSpinner />
-  if (!onboarded) return <Navigate to="/welcome" replace />
+  if (gate === undefined) return <FullPageSpinner />
+  // A mobile number comes first (Google sign ups and older accounts have none),
+  // then choosing a plan.
+  if (!gate.phone) return <Navigate to="/add-phone" replace />
+  if (!gate.onboarded) return <Navigate to="/welcome" replace />
   if (!initialized || storeUserId !== user.id) return <FullPageSpinner />
   return children
 }
@@ -74,7 +80,7 @@ function Nav() {
   const { logout } = useAuth()
   const isStory = loc.pathname.startsWith('/story/')
   const isLogin = loc.pathname === '/login'
-  const isWelcome = loc.pathname === '/welcome'
+  const isWelcome = loc.pathname === '/welcome' || loc.pathname === '/add-phone'
   const isLegal = loc.pathname === '/privacy' || loc.pathname === '/terms'
   const isReset = loc.pathname === '/reset-password'
   if (isStory || isLogin || isWelcome || isLegal || isReset) return null
@@ -182,6 +188,7 @@ function AppRoutes() {
           which is the whole reason they exist. */}
       <Route path="/privacy" element={<Privacy />} />
       <Route path="/terms" element={<Terms />} />
+      <Route path="/add-phone" element={<RequireSession><AddPhone /></RequireSession>} />
       <Route path="/welcome" element={<RequireSession><Welcome /></RequireSession>} />
       <Route path="/reset-password" element={<RequireSession><ResetPassword /></RequireSession>} />
       <Route path="/" element={<RequireAuth><Home /></RequireAuth>} />

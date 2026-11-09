@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate, Link, useSearchParams } from 'react-router-dom'
-import { useStore } from '../lib/store'
+import { useStore, usedThisMonthOf } from '../lib/store'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../lib/AuthContext'
 import { Avatar, Button, SectionLabel, Spinner } from '../components/UI'
 import { v4 as uuidv4 } from 'uuid'
 import { LANGUAGES } from '../lib/languages'
 
-const GENRES = ['Ocean','Bedtime','Fantasy','Space','Jungle','Comedy','Adventure','Magic']
-const GENRE_EMOJI = { Ocean:'🌊', Bedtime:'🌙', Fantasy:'🧙', Space:'🚀', Jungle:'🦁', Comedy:'😄', Adventure:'⚗️', Magic:'✨' }
+const GENRES = ['Ocean','Cosy','Fantasy','Space','Jungle','Comedy','Adventure','Magic']
+const GENRE_EMOJI = { Ocean:'🌊', Cosy:'🌙', Fantasy:'🧙', Space:'🚀', Jungle:'🦁', Comedy:'😄', Adventure:'⚗️', Magic:'✨' }
 const STYLES = [
   { id: 'Watercolour', icon: '🎨' },
   { id: 'Pixar-like', icon: '✨' },
@@ -31,6 +31,30 @@ const TIER_LIMITS = { free: 3, tier1: 25, tier2: 200 }
 const CHARACTER_LIMITS = { free: 2, tier1: 6, tier2: Infinity }
 const TIER_NAMES = { free: 'Free', tier1: 'Tier 1', tier2: 'Tier 2' }
 
+// Pictures added for a story (Tier 2). Each is shrunk so it is quick to send.
+const MAX_PICTURES = 10
+function shrinkPicture(file, maxSide = 768, quality = 0.72) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('read'))
+    reader.onload = () => {
+      const img = new Image()
+      img.onerror = () => reject(new Error('decode'))
+      img.onload = () => {
+        const scale = Math.min(1, maxSide / Math.max(img.width, img.height))
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.max(1, Math.round(img.width * scale))
+        canvas.height = Math.max(1, Math.round(img.height * scale))
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+        const dataUrl = canvas.toDataURL('image/jpeg', quality)
+        resolve({ id: Math.random().toString(36).slice(2), dataUrl, base64: dataUrl.split(',')[1], mime: 'image/jpeg' })
+      }
+      img.src = reader.result
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
 const GEN_STEPS = [
   'Writing your story',
   'Splitting into scenes',
@@ -40,7 +64,7 @@ const GEN_STEPS = [
 export default function Create() {
   const navigate = useNavigate()
   const { user } = useAuth()
-  const { characters, saveStory, getStory } = useStore()
+  const { characters, stories, saveStory, getStory } = useStore()
   const [selectedChars, setSelectedChars] = useState([])
   const [prompt, setPrompt] = useState('')
   const [genre, setGenre] = useState('Fantasy')
@@ -67,24 +91,16 @@ export default function Create() {
   const [error, setError] = useState(null)
   const [limitReached, setLimitReached] = useState(false)
   const [tier, setTier] = useState('free')
-  // How many stories this person has made this month. null while loading,
-  // or if it couldn't be checked (then nothing is blocked up front, and the
-  // server still enforces the limit as the final safety net).
-  const [usedThisMonth, setUsedThisMonth] = useState(null)
+  // Pictures to build the story around (Tier 2). Held in memory only.
+  const [pictures, setPictures] = useState([])
+  const [pictureError, setPictureError] = useState(null)
+  const pictureInput = useRef(null)
+  // Set when the server says even the one page previews are used up.
+  const [hardBlocked, setHardBlocked] = useState(false)
 
   useEffect(() => {
     supabase.from('subscriptions').select('tier, status').eq('user_id', user.id).single()
       .then(({ data }) => setTier(data?.status === 'active' ? (data.tier || 'free') : 'free'))
-  }, [user.id])
-
-  // Counted the same way the server counts: this person's stories created
-  // since the start of the current month (UTC, like the server).
-  useEffect(() => {
-    const now = new Date()
-    const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
-    supabase.from('stories').select('id', { count: 'exact', head: true })
-      .eq('owner_id', user.id).gte('created_at', startOfMonth.toISOString())
-      .then(({ count, error: countErr }) => { if (!countErr && typeof count === 'number') setUsedThisMonth(count) })
   }, [user.id])
 
   const [searchParams, setSearchParams] = useSearchParams()
@@ -128,8 +144,10 @@ export default function Create() {
   }
 
   const storyLimit = TIER_LIMITS[tier] ?? TIER_LIMITS.free
-  const atLimit = usedThisMonth !== null && usedThisMonth >= storyLimit
-  const storiesLeft = usedThisMonth === null ? null : Math.max(0, storyLimit - usedThisMonth)
+  // Counted from the stories already loaded, the same way the server counts them.
+  const usedThisMonth = usedThisMonthOf(stories)
+  const atLimit = usedThisMonth >= storyLimit
+  const storiesLeft = Math.max(0, storyLimit - usedThisMonth)
   const resetLabel = (() => {
     const now = new Date()
     return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1))
@@ -141,6 +159,23 @@ export default function Create() {
   const CORE_STYLE_IDS = ['Watercolour', 'Pixar-like']
   const styleLocked = (styleId) => tier === 'free' && !CORE_STYLE_IDS.includes(styleId)
 
+  const addPictures = async (e) => {
+    const files = Array.from(e.target.files || [])
+    e.target.value = ''
+    if (files.length === 0) return
+    setPictureError(null)
+    const room = MAX_PICTURES - pictures.length
+    if (files.length > room) setPictureError(`You can add up to ${MAX_PICTURES} pictures.`)
+    try {
+      const added = await Promise.all(files.slice(0, Math.max(0, room)).map(f => shrinkPicture(f)))
+      setPictures(prev => [...prev, ...added])
+    } catch {
+      setPictureError('One of those pictures could not be read. Try a different one.')
+    }
+  }
+  const removePicture = (id) => setPictures(prev => prev.filter(p => p.id !== id))
+  const hasPictures = pictures.length > 0
+
   const toggleChar = (id) => setSelectedChars(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id])
   const continuing = !!previousStory
   const chosenChars = continuing ? (previousStory.characters || []) : characters.filter(c => selectedChars.includes(c.id))
@@ -151,14 +186,14 @@ export default function Create() {
   // Everything that is still needed before a story can be made, so the
   // button can say so instead of just looking switched off.
   const needsCharacters = !continuing && chosenChars.length === 0
-  const needsIdea = !continuing && prompt.trim().length <= 5
+  const needsIdea = !continuing && !hasPictures && prompt.trim().length <= 5
   const missingKeys = [needsCharacters && 'characters', needsIdea && 'prompt'].filter(Boolean)
-  const canGenerate = missingKeys.length === 0 && !atLimit
+  const canGenerate = missingKeys.length === 0 && !hardBlocked
   const highlight = (key) => (showMissing && missingKeys.includes(key))
     ? { outline: '2px solid #E24B4A', outlineOffset: 8, borderRadius: 12 }
     : null
   const onGenerateClick = () => {
-    if (atLimit) return
+    if (hardBlocked) return
     if (missingKeys.length > 0) {
       setShowMissing(true)
       document.getElementById(`create-${missingKeys[0]}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -191,6 +226,7 @@ export default function Create() {
           prompt, genre: effectiveGenre, style: effectiveStyle, length,
           language: effectiveLanguage,
           toBeContinued,
+          images: hasPictures ? pictures.map(p => ({ base64: p.base64, mime: p.mime })) : undefined,
           previous: continuing ? {
             title: previousStory.title,
             chapterNumber: previousStory.chapterNumber || 1,
@@ -201,10 +237,9 @@ export default function Create() {
       if (!storyRes.ok) {
         const errBody = await storyRes.json().catch(() => ({}))
         if (errBody.limitReached) {
-          // The count shown on the form was out of date (for example, a story
-          // was made on another device). Go back to the form, which now shows
-          // the limit notice, instead of leaving a half-finished loading screen.
-          setUsedThisMonth(prev => Math.max(prev ?? 0, storyLimit))
+          // Even the one page previews are used up. Go back to the form, which
+          // now says so, instead of leaving a half-finished loading screen.
+          setHardBlocked(true)
           setGenerating(false)
           return
         }
@@ -246,8 +281,9 @@ export default function Create() {
         setTimeout(() => {
           fetch('/api/submit-image-job', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
             body: JSON.stringify({
+              sceneImage: hasPictures && pictures[i] ? { base64: pictures[i].base64, mime: pictures[i].mime } : undefined,
               imagePrompt: scene.imagePrompt,
               style: effectiveStyle,
               language: effectiveLanguage,
@@ -269,6 +305,10 @@ export default function Create() {
         continuesStoryId: continuing ? previousStory.id : null,
         characters: chosenChars,
         scenes: story.scenes,
+        // A new story is a draft until the person saves it to their library.
+        inLibrary: false,
+        // Over the monthly limit: only the first page was made (the paywall comes next).
+        paywalled: story.paywalled === true,
         createdAt: Date.now()
       }
       saveStory(fullStory).catch((err) => console.error('Background story save failed:', err))
@@ -289,7 +329,7 @@ export default function Create() {
     { emoji: '🧚', text: 'The fairies are drawing…' },
     { emoji: '🏰', text: 'Building the enchanted world…' },
     { emoji: '🐉', text: 'The dragon is painting…' },
-    { emoji: '🌙', text: 'Almost ready for bedtime…' },
+    { emoji: '🌙', text: 'Almost ready…' },
   ]
 
   const magicIndex = Math.min(genStep, MAGIC_MESSAGES.length - 1)
@@ -420,7 +460,7 @@ export default function Create() {
         </div>
       )}
 
-      {atLimit && (
+      {(atLimit || hardBlocked) && (
         <div style={{ background: '#FFF6E5', border: '1px solid #F2C879', borderRadius: 14, padding: '16px 18px' }}>
           <p style={{ fontSize: 15, fontWeight: 600, color: '#5A3A00', margin: '0 0 6px 0' }}>
             {tier === 'free'
@@ -428,7 +468,9 @@ export default function Create() {
               : `You've used all ${storyLimit} stories in your plan this month`}
           </p>
           <p style={{ fontSize: 13, color: '#7A5400', margin: '0 0 10px 0', lineHeight: 1.5 }}>
-            Your stories reset on {resetLabel}.{tier !== 'tier2' && ' Upgrade to keep creating now.'}
+            {hardBlocked
+              ? `You have also used all your previews. Your stories reset on ${resetLabel}.${tier !== 'tier2' ? ' Upgrade to keep creating now.' : ''}`
+              : `You can still start a story and read its first page. To keep reading, upgrade${tier === 'tier2' ? ' or wait until your stories reset' : ''}. Your stories reset on ${resetLabel}.`}
           </p>
           {tier !== 'tier2' && (
             <Link to="/profile?tab=plan" style={{ display: 'inline-block', background: '#534AB7', color: 'white', fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 100, textDecoration: 'none' }}>
@@ -556,6 +598,47 @@ export default function Create() {
             </button>
           ))}
         </div>}
+
+        {/* Pictures to build the story around (Tier 2) */}
+        <div style={{ marginTop: 18, padding: '14px 16px', borderRadius: 14, background: 'var(--surface-card)', border: '0.5px solid var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+            <p style={{ fontSize: 14, fontWeight: 600, margin: 0, color: 'var(--text-primary)' }}>
+              🖼️ Add your own pictures
+              <span style={{ fontSize: 11, fontWeight: 600, marginLeft: 8, padding: '2px 8px', borderRadius: 100, background: '#EEEDFE', color: '#534AB7' }}>Tier 2</span>
+            </p>
+            {tier === 'tier2' && (
+              <button onClick={() => pictureInput.current?.click()} disabled={pictures.length >= MAX_PICTURES} style={{ fontSize: 13, fontWeight: 600, color: '#534AB7', background: 'none', border: '1px solid #534AB7', borderRadius: 100, padding: '6px 14px', cursor: 'pointer', opacity: pictures.length >= MAX_PICTURES ? 0.5 : 1 }}>
+                + Add pictures
+              </button>
+            )}
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '6px 0 0', lineHeight: 1.5 }}>
+            Each picture becomes one page of the story, redrawn in your chosen art style. Your original pictures are not kept.
+          </p>
+          {tier !== 'tier2' && (
+            <p style={{ fontSize: 12, margin: '8px 0 0' }}>
+              🔒 <Link to="/profile?tab=plan" style={{ color: '#534AB7' }}>Upgrade to Tier 2</Link> to make a story from your own pictures.
+            </p>
+          )}
+          <input ref={pictureInput} type="file" accept="image/*" multiple onChange={addPictures} style={{ display: 'none' }} />
+          {pictureError && <p style={{ fontSize: 12, color: '#E24B4A', margin: '8px 0 0' }}>{pictureError}</p>}
+          {hasPictures && (
+            <>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
+                {pictures.map((pic, i) => (
+                  <div key={pic.id} style={{ position: 'relative', width: 84 }}>
+                    <img src={pic.dataUrl} alt={`Page ${i + 1}`} style={{ width: 84, height: 84, objectFit: 'cover', borderRadius: 10, display: 'block', border: '0.5px solid var(--border)' }} />
+                    <button onClick={() => removePicture(pic.id)} aria-label={`Remove picture ${i + 1}`} style={{ position: 'absolute', top: -6, right: -6, width: 22, height: 22, borderRadius: '50%', border: 'none', background: '#3C3489', color: 'white', fontSize: 12, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+                    <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '4px 0 0', textAlign: 'center' }}>Page {i + 1}</p>
+                  </div>
+                ))}
+              </div>
+              <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '10px 0 0' }}>
+                Your story will have {pictures.length} {pictures.length === 1 ? 'page' : 'pages'}. Telling us what it is about is optional.
+              </p>
+            </>
+          )}
+        </div>
       </section>
 
       <div style={{ height: '0.5px', background: 'var(--border)' }} />
@@ -603,7 +686,7 @@ export default function Create() {
       )}
 
       {/* Step 4: Length */}
-      <section>
+      {!hasPictures && <section>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
           <div style={{ width: 24, height: 24, borderRadius: '50%', background: '#534AB7', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{continuing ? 2 : 4}</div>
           <h2 style={{ fontSize: 16, fontWeight: 600 }}>Story length</h2>
@@ -625,7 +708,7 @@ export default function Create() {
             </div>
           ))}
         </div>
-      </section>
+      </section>}
 
       {/* Language (a continued story keeps its own language) */}
       {!continuing && (
@@ -691,7 +774,7 @@ export default function Create() {
         </div>
       </section>
 
-      {!atLimit && storiesLeft !== null && (tier === 'free' || storiesLeft <= 3) && (
+      {!atLimit && (tier === 'free' || storiesLeft <= 3) && (
         <p style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', margin: '0 0 -12px 0' }}>
           {storiesLeft === 1
             ? `Last story this month on your plan`
@@ -699,7 +782,7 @@ export default function Create() {
         </p>
       )}
       {/* What is still needed, shown while anything is missing */}
-      {!atLimit && missingKeys.length > 0 && (
+      {missingKeys.length > 0 && (
         <div style={{ background: 'var(--surface-card)', border: `0.5px solid ${showMissing ? '#E24B4A' : 'var(--border)'}`, borderRadius: 12, padding: '12px 14px', marginBottom: -8 }}>
           <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', margin: '0 0 6px 0' }}>ⓘ To create your story you need to:</p>
           {[
@@ -714,10 +797,10 @@ export default function Create() {
       )}
       <Button
         onClick={onGenerateClick}
-        disabled={atLimit}
-        style={{ width: '100%', justifyContent: 'center', padding: '14px', fontSize: 15, borderRadius: 14, marginTop: 4, opacity: atLimit ? 0.5 : (canGenerate ? 1 : 0.6) }}
+        disabled={hardBlocked}
+        style={{ width: '100%', justifyContent: 'center', padding: '14px', fontSize: 15, borderRadius: 14, marginTop: 4, opacity: hardBlocked ? 0.5 : (canGenerate ? 1 : 0.6) }}
       >
-        {atLimit ? 'Monthly limit reached' : continuing ? '✨ Write the next chapter' : '✨ Generate story'}
+        {hardBlocked ? 'Monthly limit reached' : atLimit ? '✨ Start a story (first page)' : continuing ? '✨ Write the next chapter' : '✨ Generate story'}
       </Button>
     </div>
   )

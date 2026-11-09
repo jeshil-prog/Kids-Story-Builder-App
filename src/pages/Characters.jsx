@@ -30,106 +30,98 @@ function compressImage(dataUrl, mimeType) {
   })
 }
 
+// We never keep photos of people. A photo is used for one moment: it is turned
+// into a cartoon (Pixar style) portrait, and described for the illustrator. Only
+// the cartoon and the description are saved. The photo lives in this form's
+// memory until it is closed, and is then gone.
 function CharacterForm({ initial, onSave, onCancel }) {
   const [name, setName] = useState(initial?.name || '')
   const [age, setAge] = useState(initial?.age || '')
   const [personality, setPersonality] = useState(initial?.personality || '')
   const [role, setRole] = useState(initial?.role || '')
-  const [photo, setPhoto] = useState(initial?.photo || null)
-  const [photoBase64, setPhotoBase64] = useState(initial?.photoBase64 || null)
-  const [photoMime, setPhotoMime] = useState(initial?.photoMime || 'image/jpeg')
-  // Durable S3 URL for the photo — this, not photoBase64, is what actually
-  // survives a page reload. photoBase64 is deliberately stripped before
-  // writing characters to localStorage (it's too large and would blow the
-  // quota), so it only ever exists in memory for the current session. That
-  // was silently losing character photos on reload — easy to miss on
-  // desktop where a tab often stays open the whole time, but iOS Safari
-  // evicts backgrounded tab memory far more readily, which is why this was
-  // actually visible as "characters don't save on mobile."
-  const [photoUrl, setPhotoUrl] = useState(initial?.photoUrl || null)
-  const [uploadingPhoto, setUploadingPhoto] = useState(false)
+  // The cartoon portrait that gets saved. An old stored photo is not reused: it is
+  // only shown until it has been replaced.
+  const [portraitUrl, setPortraitUrl] = useState(initial?.photoUrl && initial.photoUrl.includes('/avatars/') ? initial.photoUrl : null)
+  const [legacyPhotoUrl] = useState(initial?.photoUrl && !initial.photoUrl.includes('/avatars/') ? initial.photoUrl : null)
+  // The photo itself, in memory only, so the portrait can be made again.
+  const [photoBase64, setPhotoBase64] = useState(null)
+  const [makingPortrait, setMakingPortrait] = useState(false)
+  const [portraitError, setPortraitError] = useState(null)
   const [description, setDescription] = useState(initial?.description || '')
   const [analysing, setAnalysing] = useState(false)
   const fileRef = useRef()
-  // handleSave awaits this if a photo upload is still in flight, so the
-  // durable URL is always captured before the character is saved rather
-  // than racing it.
-  const photoUploadPromiseRef = useRef(null)
+  // handleSave waits for the portrait if it is still being made.
+  const portraitPromiseRef = useRef(null)
 
-  const handlePhoto = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-
-    const reader = new FileReader()
-    reader.onload = async () => {
-      // Compress before storing
-      const compressed = await compressImage(reader.result, file.type)
-      const base64 = compressed.split(',')[1]
-
-      setPhoto(compressed)
-      setPhotoBase64(base64)
-      setPhotoMime('image/jpeg')
-      setPhotoUrl(null)
-
-      // Upload to S3 for durable storage — runs alongside the description
-      // analysis below, not blocking it.
-      setUploadingPhoto(true)
-      const uploadPromise = fetch('/api/upload-photo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ base64, mimeType: 'image/jpeg' })
-      })
-        .then(res => res.ok ? res.json() : null)
-        .then(data => { if (data?.url) setPhotoUrl(data.url) })
-        .catch(err => console.error('Photo upload failed:', err))
-        .finally(() => setUploadingPhoto(false))
-      photoUploadPromiseRef.current = uploadPromise
-
-      // Auto-analyse the photo — use name if available, otherwise analyse immediately
-      const nameToUse = name || initial?.name || 'the character'
-      setAnalysing(true)
-      try {
-        const res = await fetch('/api/describe-character', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            photoBase64: base64,
-            mimeType: 'image/jpeg',
-            name: nameToUse,
-            age: age || initial?.age
-          })
-        })
-        if (res.ok) {
-          const { description: desc } = await res.json()
-          setDescription(desc)
-        }
-      } catch (err) {
-        console.error('Photo analysis failed:', err)
-      }
-      setAnalysing(false)
-    }
-    reader.readAsDataURL(file)
+  const authHeaders = async () => {
+    const { data: { session } } = await supabase.auth.getSession()
+    return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` }
   }
 
-  // Also analyse when name is filled in after photo
-  const handleAnalyse = async () => {
-    if (!photoBase64 || analysing) return
+  const makePortrait = (base64) => {
+    setMakingPortrait(true)
+    setPortraitError(null)
+    const run = (async () => {
+      try {
+        const res = await fetch('/api/generate-avatar', {
+          method: 'POST',
+          headers: await authHeaders(),
+          body: JSON.stringify({ photoBase64: base64, mimeType: 'image/jpeg' })
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok || !data.url) throw new Error(data.error || 'Could not make the portrait.')
+        setPortraitUrl(data.url)
+      } catch (err) {
+        setPortraitError(err.message || 'Could not make the portrait.')
+      } finally {
+        setMakingPortrait(false)
+      }
+    })()
+    portraitPromiseRef.current = run
+    return run
+  }
+
+  const analysePhoto = async (base64, nameToUse, ageToUse) => {
     setAnalysing(true)
     try {
       const res = await fetch('/api/describe-character', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ photoBase64, mimeType: photoMime, name, age })
+        body: JSON.stringify({ photoBase64: base64, mimeType: 'image/jpeg', name: nameToUse, age: ageToUse })
       })
       if (res.ok) {
         const { description: desc } = await res.json()
         setDescription(desc)
       }
-    } catch {}
+    } catch (err) {
+      console.error('Photo analysis failed:', err)
+    }
     setAnalysing(false)
   }
 
-  // Auto-analyse when name is typed after photo is already uploaded
+  const handlePhoto = async (e) => {
+    const file = e.target.files[0]
+    e.target.value = ''
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = async () => {
+      const compressed = await compressImage(reader.result, file.type)
+      const base64 = compressed.split(',')[1]
+      setPhotoBase64(base64)
+      setPortraitUrl(null)
+      // The cartoon and the description are made side by side.
+      makePortrait(base64)
+      analysePhoto(base64, name || initial?.name || 'the character', age || initial?.age)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleAnalyse = () => {
+    if (!photoBase64 || analysing) return
+    analysePhoto(photoBase64, name, age)
+  }
+
+  // Describe the photo once a name is typed, if it was added before the name.
   const handleNameChange = (val) => {
     setName(val)
     if (val.trim().length > 1 && photoBase64 && !description && !analysing) {
@@ -143,43 +135,54 @@ function CharacterForm({ initial, onSave, onCancel }) {
 
   const handleSave = async () => {
     if (!valid) return
-    // Make sure the S3 upload has finished (if one was in flight) so we
-    // always save the durable URL, not a race against it.
-    if (photoUploadPromiseRef.current) {
-      await photoUploadPromiseRef.current
-    }
-    onSave({ name, age, personality, role, photo, photoBase64, photoMime, photoUrl, description })
+    if (portraitPromiseRef.current) await portraitPromiseRef.current
+    // Only the cartoon portrait is saved. Never a photo.
+    onSave({ name, age, personality, role, photoUrl: portraitUrl, description })
   }
+
+  const showing = portraitUrl || legacyPhotoUrl
 
   return (
     <div style={{ background: 'var(--surface-card)', border: '0.5px solid var(--border)', borderRadius: 16, padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Photo upload */}
+      {/* Portrait */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
         <div
-          onClick={() => fileRef.current.click()}
+          onClick={() => !makingPortrait && fileRef.current.click()}
           style={{
             width: 80, height: 80, borderRadius: '50%', cursor: 'pointer',
             border: '2px dashed var(--border-strong)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            overflow: 'hidden', flexShrink: 0, transition: 'border-color 0.15s',
+            overflow: 'hidden', flexShrink: 0, transition: 'border-color 0.15s', position: 'relative'
           }}
           onMouseEnter={e => e.currentTarget.style.borderColor = '#534AB7'}
           onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border-strong)'}
         >
-          {photo
-            ? <img src={photo} alt="character" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            : <span style={{ fontSize: 28, color: 'var(--text-muted)' }}>📷</span>
-          }
+          {makingPortrait
+            ? <Spinner size={22} />
+            : showing
+              ? <img src={showing} alt="Cartoon portrait" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              : <span style={{ fontSize: 28, color: 'var(--text-muted)' }}>📷</span>}
         </div>
         <input ref={fileRef} type="file" accept="image/*" onChange={handlePhoto} style={{ display: 'none' }} />
         <div style={{ flex: 1 }}>
-          <p style={{ fontSize: 13, fontWeight: 500, marginBottom: 2 }}>Photo</p>
+          <p style={{ fontSize: 13, fontWeight: 500, marginBottom: 2 }}>Cartoon portrait</p>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-            Upload a clear photo — we'll analyse it to describe the character for the illustrator.
+            Upload a clear photo and we turn it into a Pixar style portrait. We describe the photo for the illustrator, then the photo is thrown away. Only the cartoon is kept.
           </p>
-          <button onClick={() => fileRef.current.click()} style={{ fontSize: 12, color: '#534AB7', background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginTop: 4 }}>
-            {photo ? 'Change photo' : 'Upload photo'}
+          <button onClick={() => fileRef.current.click()} disabled={makingPortrait} style={{ fontSize: 12, color: '#534AB7', background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginTop: 4 }}>
+            {makingPortrait ? 'Making the portrait…' : portraitUrl ? 'Use a different photo' : 'Upload photo'}
           </button>
+          {portraitError && (
+            <p style={{ fontSize: 12, color: '#E24B4A', margin: '6px 0 0', lineHeight: 1.5 }}>
+              {portraitError}{' '}
+              {photoBase64 && <button onClick={() => makePortrait(photoBase64)} style={{ fontSize: 12, color: '#534AB7', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>Try again</button>}
+            </p>
+          )}
+          {legacyPhotoUrl && !portraitUrl && !makingPortrait && (
+            <p style={{ fontSize: 12, color: '#B26A00', margin: '6px 0 0', lineHeight: 1.5 }}>
+              This character still has a stored photo. Upload a photo to replace it with a cartoon portrait.
+            </p>
+          )}
         </div>
       </div>
 
@@ -206,29 +209,29 @@ function CharacterForm({ initial, onSave, onCancel }) {
         </div>
       </div>
 
-      {/* AI-generated appearance description */}
+      {/* Appearance description, written from the photo */}
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
           <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)' }}>
             Appearance description
             <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400, marginLeft: 6 }}>used to draw the character</span>
           </p>
-          {photo && !analysing && (
+          {photoBase64 && !analysing && (
             <button onClick={handleAnalyse} style={{ fontSize: 12, color: '#534AB7', background: 'none', border: 'none', cursor: 'pointer' }}>
-              Re-analyse photo ↻
+              Describe the photo again ↻
             </button>
           )}
         </div>
         {analysing ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'var(--surface-input)', borderRadius: 10, border: '0.5px solid var(--border)' }}>
             <Spinner size={16} />
-            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Analysing photo…</span>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Looking at the photo…</span>
           </div>
         ) : (
           <textarea
             value={description}
             onChange={e => setDescription(e.target.value)}
-            placeholder={photo ? 'Upload a photo and we\'ll fill this in automatically…' : 'e.g. A boy with short brown hair, blue eyes, and a wide smile…'}
+            placeholder={photoBase64 ? 'We will fill this in from the photo…' : 'e.g. A boy with short brown hair, blue eyes, and a wide smile…'}
             rows={3}
             style={{
               width: '100%', padding: '10px 14px', borderRadius: 10,
@@ -240,15 +243,15 @@ function CharacterForm({ initial, onSave, onCancel }) {
         )}
         {description && (
           <p style={{ fontSize: 11, color: '#1D9E75', marginTop: 5 }}>
-            ✓ Description ready — this will be used in every scene illustration
+            ✓ Description ready. It will be used in every scene illustration.
           </p>
         )}
       </div>
 
       <div style={{ display: 'flex', gap: 10 }}>
         <Button onClick={onCancel} variant="secondary" style={{ flex: 1 }}>Cancel</Button>
-        <Button onClick={handleSave} disabled={!valid} style={{ flex: 1 }}>
-          {uploadingPhoto ? 'Saving…' : 'Save character'}
+        <Button onClick={handleSave} disabled={!valid || makingPortrait} style={{ flex: 1 }}>
+          {makingPortrait ? 'Making portrait…' : 'Save character'}
         </Button>
       </div>
     </div>
@@ -274,6 +277,40 @@ export default function Characters() {
   }, [user.id])
 
   const ownCharacters = characters.filter(c => c.ownerId === user.id)
+
+  // Characters made before cartoon portraits still have a stored photo. We no
+  // longer keep photos of people, so they are offered a one tap conversion.
+  const legacy = ownCharacters.filter(c => c.photoUrl && !c.photoUrl.includes('/avatars/'))
+  const [converting, setConverting] = useState(null) // { done, total } while running
+  const [convertErrors, setConvertErrors] = useState([])
+  const convertAll = async () => {
+    const list = [...legacy]
+    setConvertErrors([])
+    setConverting({ done: 0, total: list.length })
+    const failed = []
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i]
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        const res = await fetch('/api/generate-avatar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
+          body: JSON.stringify({ sourceUrl: c.photoUrl })
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok || !data.url) throw new Error(data.error || 'failed')
+        // The server has already swapped the photo for the cartoon and deleted
+        // the photo. This brings the screen up to date.
+        await updateCharacter(c.id, { photoUrl: data.url })
+      } catch (err) {
+        failed.push(c.name)
+      }
+      setConverting({ done: i + 1, total: list.length })
+    }
+    setConvertErrors(failed)
+    setConverting(null)
+  }
+
   const limit = TIER_CHARACTER_LIMITS[tier] ?? TIER_CHARACTER_LIMITS.free
   const atLimit = ownCharacters.length >= limit
 
@@ -293,7 +330,7 @@ export default function Characters() {
         {!adding && (
           atLimit ? (
             <Link to="/profile?tab=plan" style={{ fontSize: 12, color: '#534AB7', fontWeight: 600, textDecoration: 'none' }}>
-              🔒 {ownCharacters.length}/{limit} used — upgrade for more
+              🔒 {ownCharacters.length}/{limit} used. Upgrade for more
             </Link>
           ) : (
             <Button onClick={() => setAdding(true)} style={{ padding: '8px 16px', fontSize: 13 }}>
@@ -302,6 +339,21 @@ export default function Characters() {
           )
         )}
       </div>
+
+      {legacy.length > 0 && !adding && (
+        <div style={{ background: '#FFF6E5', border: '1px solid #F2C879', borderRadius: 14, padding: '14px 16px' }}>
+          <p style={{ fontSize: 14, fontWeight: 600, color: '#5A3A00', margin: '0 0 4px' }}>We no longer keep photos of people</p>
+          <p style={{ fontSize: 13, color: '#7A5400', margin: '0 0 10px', lineHeight: 1.5 }}>
+            {legacy.length === 1 ? '1 character still has' : `${legacy.length} characters still have`} a stored photo. Turn {legacy.length === 1 ? 'it' : 'them'} into cartoon portraits and the photos will be deleted for good.
+          </p>
+          <button onClick={convertAll} disabled={!!converting} style={{ background: '#534AB7', color: 'white', border: 'none', borderRadius: 100, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: converting ? 'wait' : 'pointer', opacity: converting ? 0.7 : 1 }}>
+            {converting ? `Converting ${Math.min(converting.done + 1, converting.total)} of ${converting.total}…` : 'Turn photos into portraits'}
+          </button>
+          {convertErrors.length > 0 && (
+            <p style={{ fontSize: 12, color: '#A32D2D', margin: '8px 0 0' }}>Could not convert: {convertErrors.join(', ')}. You can try again, or open the character and upload a different photo.</p>
+          )}
+        </div>
+      )}
 
       {adding && (
         <CharacterForm
