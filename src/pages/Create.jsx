@@ -440,6 +440,9 @@ export default function Create() {
 
   return (
     <div style={{ overflowY: 'auto', flex: 1, padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 28 }}>
+      <div style={{ marginBottom: -12 }}>
+        <button onClick={() => navigate('/')} style={{ background: 'none', border: '0.5px solid var(--border)', borderRadius: 8, padding: '6px 12px', fontSize: 13, color: 'var(--text-secondary)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}>← Home</button>
+      </div>
       {continuing && (
         <div style={{ background: '#EEEDFE', border: '1px solid #C9C5F4', borderRadius: 14, padding: '14px 16px' }}>
           <p style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#534AB7', margin: '0 0 4px 0' }}>
