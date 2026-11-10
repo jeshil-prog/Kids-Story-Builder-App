@@ -80,7 +80,8 @@ export default async function handler(req, res) {
           { type: 'input_image', image_url: `data:${mime};base64,${b64}` }
         ]
       }],
-      tools: [{ type: 'image_generation', quality: 'medium', size: '1024x1024' }]
+      // Low quality is plenty for a small round portrait, and is much quicker.
+      tools: [{ type: 'image_generation', quality: 'low', size: '1024x1024', output_format: 'jpeg', output_compression: 85 }]
     })
 
     const image = (response.output || []).find((o) => o.type === 'image_generation_call' && o.result)
@@ -89,7 +90,7 @@ export default async function handler(req, res) {
       return res.status(422).json({ error: 'We could not make a cartoon portrait from that photo. Try a clearer photo, or a different one.' })
     }
 
-    const url = await uploadToS3(image.result, 'image/png', `avatars/${randomUUID()}.png`)
+    const url = await uploadToS3(image.result, 'image/jpeg', `avatars/${randomUUID()}.jpg`)
 
     // An old stored photo is swapped for the cartoon and then removed for good.
     if (oldKey) {

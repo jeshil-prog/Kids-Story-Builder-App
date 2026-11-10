@@ -1,4 +1,5 @@
 import React from 'react'
+import SmartImage from './SmartImage'
 
 export const GENRE_EMOJI = { Ocean: '🌊', Bedtime: '🌙', Cosy: '🌙', Fantasy: '🧙', Space: '🚀', Jungle: '🦁', Comedy: '😄', Adventure: '⚗️', Magic: '✨' }
 const PALETTE = ['#0F3460', '#1a0533', '#023020', '#2d0a20', '#001a2d', '#26215C']
@@ -15,7 +16,8 @@ export default function StoryCover({ story, index = 0, ratio = '1 / 1', pill = n
       background: picture ? '#1a1830' : PALETTE[index % PALETTE.length]
     }}>
       {picture
-        ? <img src={picture} alt="" loading="lazy" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        ? <SmartImage src={picture} alt="" lazy placeholder="rgba(255,255,255,0.06)" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            fallback={<div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 44, paddingBottom: 28 }}>{GENRE_EMOJI[story.genre] || '📖'}</div>} />
         : <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 44, paddingBottom: 28 }}>{GENRE_EMOJI[story.genre] || '📖'}</div>}
       {titleSize > 0 && <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '28px 10px 9px', background: 'linear-gradient(to top, rgba(8,6,20,0.88) 0%, rgba(8,6,20,0.55) 55%, rgba(8,6,20,0) 100%)' }}>
         {chapter && <p style={{ margin: '0 0 2px', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.75)' }}>{chapter}</p>}

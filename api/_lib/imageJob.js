@@ -16,8 +16,8 @@ const STYLE_PROMPTS = {
 // Stores the original params alongside the job mapping so a rate-limited
 // job can retry itself later without needing the client to resend anything.
 //
-// sceneImage (Tier 2 only): a picture the person supplied for this page. It is
-// used only as a guide for the illustration, and it is never stored by us. It
+// sceneImage (Tier 2 only): a picture the person supplied for this page. The page is
+// an exact recreation of it in the chosen style. It is never stored by us. It
 // travels with the job parameters in Redis, which expire after an hour, so a
 // retry can still use it.
 export async function submitImageJob({ imagePrompt, style, characters, storyId, sceneIndex, sceneImage }) {
@@ -35,7 +35,24 @@ export async function submitImageJob({ imagePrompt, style, characters, storyId, 
     .map((c) => `${c.name}: ${c.description}`)
     .join('\n')
 
-  const fullPrompt = `${styleDesc} children's picture book full-page illustration.
+  // A person's own picture is RECREATED, not reinvented. The picture decides the
+  // people, their poses, clothes, the place and everything in it. Only the way it
+  // is drawn changes, to the chosen illustration style.
+  const recreate = !!sceneImage?.base64
+
+  const fullPrompt = recreate
+    ? `Recreate the attached photograph as a ${styleDesc} illustration.
+
+This must be a faithful, exact recreation of the photograph:
+- Keep the same number of people, in the same positions, with the same poses, expressions, clothing, hair, skin tones and faces, so each person is clearly recognisable.
+- Keep the same place, background, objects, signs, colours, lighting and camera angle, and the same framing and composition.
+- Do NOT add, remove, move or swap anything. Do not add people, animals, birds, creatures or props that are not in the photograph. Do not change the setting.
+- The ONLY change is the rendering style: redraw the whole photograph in the ${style || 'chosen'} illustration style described above, so it looks like a page from a picture book. Never leave it looking like a photograph.
+- Square image. No text or words, except lettering that is physically part of a sign or shirt in the photograph, drawn as simply as possible. Child-safe.
+
+For reference, this is what the page of the story says is happening: ${imagePrompt}
+If that description disagrees with the photograph, the photograph wins.`
+    : `${styleDesc} children's picture book full-page illustration.
 
 THE SCENE:
 ${imagePrompt}
@@ -43,28 +60,32 @@ ${imagePrompt}
 ${charNames ? `CHARACTERS IN THIS SCENE: ${charNames}.` : ''}
 ${charDescriptions ? `CHARACTER APPEARANCES (preserve exactly):\n${charDescriptions}` : ''}
 
-${sceneImage ? 'The LAST reference image is the picture this page is based on. Keep its people, place, objects and composition, but redraw everything in the illustration style above.\n' : ''}${charsWithPhotos.length ? 'REFERENCE IMAGES show how the characters look. Use them only for the faces, hair and features. Always draw in the illustration style above, never in the style of a reference image.' : ''}
+${charsWithPhotos.length ? 'REFERENCE IMAGES show how the characters look. Use them only for the faces, hair and features. Always draw in the illustration style above, never in the style of a reference image.' : ''}
 
 STYLE RULES: Wide cinematic composition. Rich detailed environment. Characters integrated naturally into the scene. Warm, joyful, magical atmosphere. No text or words in the image. Child-safe.`
 
   const content = [{ type: 'input_text', text: fullPrompt }]
-  for (const char of charsWithPhotos) {
-    if (char.photoBase64) {
-      const mediaType = char.photoMime || 'image/jpeg'
-      content.push({ type: 'input_image', image_url: `data:${mediaType};base64,${char.photoBase64}` })
-    } else if (char.photoUrl) {
-      content.push({ type: 'input_image', image_url: char.photoUrl })
-    }
-  }
-
-  if (sceneImage?.base64) {
+  if (recreate) {
+    // The photograph is the only picture sent. The people in it are drawn from it
+    // directly, so no separate character pictures are added to compete with it.
     content.push({ type: 'input_image', image_url: `data:${sceneImage.mime || 'image/jpeg'};base64,${sceneImage.base64}` })
+  } else {
+    for (const char of charsWithPhotos) {
+      if (char.photoBase64) {
+        const mediaType = char.photoMime || 'image/jpeg'
+        content.push({ type: 'input_image', image_url: `data:${mediaType};base64,${char.photoBase64}` })
+      } else if (char.photoUrl) {
+        content.push({ type: 'input_image', image_url: char.photoUrl })
+      }
+    }
   }
 
   const response = await openai.responses.create({
     model: 'gpt-5.5',
     input: [{ role: 'user', content }],
-    tools: [{ type: 'image_generation', quality: 'medium', size: '1024x1024' }],
+    // JPEG keeps each picture a fraction of the size of a PNG, so pages load fast.
+    // input_fidelity high makes the model hold on to the details of a supplied photo.
+    tools: [{ type: 'image_generation', quality: 'medium', size: '1024x1024', output_format: 'jpeg', output_compression: 85, ...(recreate ? { input_fidelity: 'high' } : {}) }],
     background: true
   })
 

@@ -169,8 +169,8 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true })
     }
 
-    const key = `scenes/${storyId}/${sceneIndex}.png`
-    const imageUrl = await uploadToS3(imageData[0], 'image/png', key)
+    const key = `scenes/${storyId}/${sceneIndex}.jpg`
+    const imageUrl = await uploadToS3(imageData[0], 'image/jpeg', key)
 
     await redisSet(sceneKey, { status: 'done', imageUrl }, 3600)
     return res.status(200).json({ ok: true, imageUrl })

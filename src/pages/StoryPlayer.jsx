@@ -6,6 +6,7 @@ import { useAuth } from '../lib/AuthContext'
 import { stopAmbientSfx } from '../lib/sfx'
 import { tokenize, wordGap, buildCueTimeline } from '../lib/words'
 import { CHAR_WIDTH } from '../lib/languages'
+import { preloadImage, isPreloaded } from '../components/SmartImage'
 
 // ---- Learning mode: word highlighting -------------------------------------
 // Narration audio is a single file with no per-word timestamps, so the active
@@ -545,6 +546,16 @@ export default function StoryPlayer() {
   }, [])
 
   const scenes = story?.scenes || []
+
+  // Every page picture is fully loaded and decoded before it counts as ready, so
+  // a page never appears half drawn. Pictures further ahead load while reading.
+  const [, bumpImages] = useState(0)
+  useEffect(() => {
+    scenes.forEach((sc) => {
+      const u = sc?.imageUrl
+      if (u && !isPreloaded(u)) preloadImage(u).then(() => bumpImages((n) => n + 1))
+    })
+  }, [scenes])
   const current = scenes[scene]
   const lang = story?.language || 'en'
   const isOwner = !!story && (!story.ownerId || story.ownerId === user?.id)
@@ -557,7 +568,7 @@ export default function StoryPlayer() {
   // exist — narration used to be generated live during playback (no image
   // check needed for it), but it's now pre-generated alongside the image at
   // creation time, so advancing needs to wait on both the same way.
-  const isSceneReady = (sc) => !!(sc?.imageUrl || sc?.imageData) && !!sc?.narrationUrl
+  const isSceneReady = (sc) => !!(sc?.imageData || (sc?.imageUrl && isPreloaded(sc.imageUrl))) && !!sc?.narrationUrl
 
   const goNext = useCallback((continueReading = false) => {
     const nextIndex = scene + 1
@@ -879,7 +890,7 @@ export default function StoryPlayer() {
   // a phone sideways switches to the wide layout straight away.
   const goToScene = (i) => {
     const sc = scenes[i]
-    if (sc && (sc.imageUrl || sc.imageData)) { stopAudio(); setWaitingForNext(false); setScene(i) }
+    if (sc && (sc.imageData || (sc.imageUrl && isPreloaded(sc.imageUrl)))) { stopAudio(); setWaitingForNext(false); setScene(i) }
   }
   const imgSrc = current?.imageUrl || (current?.imageData ? `data:${current.imageType || 'image/png'};base64,${current.imageData}` : null)
   const circleStyle = (size, disabled, dim) => ({

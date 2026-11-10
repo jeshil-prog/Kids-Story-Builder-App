@@ -1,4 +1,5 @@
 import React from 'react'
+import SmartImage from './SmartImage'
 
 export function Button({ children, onClick, variant = 'primary', disabled, className = '', style = {}, type = 'button' }) {
   const base = {
@@ -56,7 +57,8 @@ export function Avatar({ name, photo, size = 40, style = {} }) {
   const idx = name ? name.charCodeAt(0) % colors.length : 0
   const [bg, fg] = colors[idx]
   return photo
-    ? <img src={photo} alt={name} style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, ...style }} />
+    ? <SmartImage src={photo} alt={name} lazy style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, display: 'block', ...style }}
+        fallback={<div style={{ width: size, height: size, borderRadius: '50%', background: bg, color: fg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: size * 0.38, flexShrink: 0, ...style }}>{name?.[0]?.toUpperCase()}</div>} />
     : <div style={{ width: size, height: size, borderRadius: '50%', background: bg, color: fg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: size * 0.38, flexShrink: 0, ...style }}>{name?.[0]?.toUpperCase()}</div>
 }
 

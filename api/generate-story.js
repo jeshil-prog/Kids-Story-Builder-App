@@ -155,7 +155,12 @@ ${languageRule}${endingRule}
 Respond ONLY with valid JSON. No markdown, no code fences, no extra text.`
 
   const pictureRule = pictures.length > 0
-    ? `The person has supplied ${pictures.length} ${pictures.length === 1 ? 'picture' : 'pictures'}, shown above in order. Write exactly ${pictures.length} ${pictures.length === 1 ? 'scene' : 'scenes'}. Scene 1 is based on picture 1, scene 2 on picture 2, and so on. Each scene's narration must describe the moment shown in its picture (where it is, who is there, what is happening) while moving the story forward, so the pages read as one adventure. Each imagePrompt must describe that same moment so an illustrator can redraw the picture in the chosen style. Never mention photos or pictures in the narration.\n\n`
+    ? `The person has supplied ${pictures.length} ${pictures.length === 1 ? 'picture' : 'pictures'}, shown above in order. Each picture will be recreated EXACTLY, as it is, as the illustration for one page, only redrawn in the chosen art style. So the story must be built around the pictures, and must never contradict them.
+- Write exactly ${pictures.length} ${pictures.length === 1 ? 'scene' : 'scenes'}. Scene 1 uses picture 1, scene 2 uses picture 2, and so on.
+- Study each picture closely. The people in the pictures are the stars of the story: use the character names given below for them, matching each name to the person it fits best. If a picture shows a person who matches none of the named characters, give them a simple friendly role without inventing a new name for them.
+- Each scene's narration must describe what is really in its picture: who is there, how many people, what they are wearing and doing, where they are, and the objects and surroundings that can be seen. Do not describe anything that is not visible. Then move the story forward, so all the pages read as one adventure that naturally includes every picture.
+- Each imagePrompt must be a plain, literal description of exactly what is visible in that picture (people and their positions, clothing, poses, expressions, the place, objects, light), and nothing else. Do not invent extra people, animals, creatures, magic or props in an imagePrompt.
+- Never mention photos or pictures in the narration.\n\n`
     : ''
 
   const userPrompt = `${continuation}${pictureRule}Write a ${sceneCount}-scene personalised children's adventure story.

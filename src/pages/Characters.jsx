@@ -4,6 +4,7 @@ import { useStore } from '../lib/store'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../lib/AuthContext'
 import { Avatar, Button, Input, Spinner } from '../components/UI'
+import SmartImage from '../components/SmartImage'
 
 const PERSONALITIES = ['Brave', 'Curious', 'Funny', 'Kind', 'Adventurous', 'Clever', 'Gentle', 'Playful']
 
@@ -160,7 +161,7 @@ function CharacterForm({ initial, onSave, onCancel }) {
           {makingPortrait
             ? <Spinner size={22} />
             : showing
-              ? <img src={showing} alt="Cartoon portrait" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ? <SmartImage src={showing} alt="Cartoon portrait" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
               : <span style={{ fontSize: 28, color: 'var(--text-muted)' }}>📷</span>}
         </div>
         <input ref={fileRef} type="file" accept="image/*" onChange={handlePhoto} style={{ display: 'none' }} />

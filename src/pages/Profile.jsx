@@ -6,6 +6,7 @@ import { useStore, libraryOf, deletedOf, continuedIdsOf, usedThisMonthOf, daysLe
 import { normalisePhone, PHONE_HELP } from '../lib/phone'
 import StoryCover from '../components/StoryCover'
 import { Avatar } from '../components/UI'
+import SmartImage from '../components/SmartImage'
 import LibraryGrid from '../components/LibraryGrid'
 import FriendsPanel from '../components/FriendsPanel'
 
@@ -394,7 +395,7 @@ export default function Profile() {
               {ownPhotos.map(c => (
                 <a key={c.id} href={c.photoUrl} target="_blank" rel="noreferrer" style={{ textDecoration: 'none', color: 'inherit' }}>
                   <div style={{ aspectRatio: '1 / 1', borderRadius: 14, overflow: 'hidden', background: 'var(--surface-card)', border: '0.5px solid var(--border)' }}>
-                    <img src={c.photoUrl} alt={c.name} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                    <SmartImage src={c.photoUrl} alt={c.name} lazy style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                   </div>
                   <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', margin: '6px 0 0' }}>{c.name}</p>
                   {c.createdAt && <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0 }}>{new Date(c.createdAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}</p>}
