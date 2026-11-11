@@ -41,17 +41,14 @@ export async function submitImageJob({ imagePrompt, style, characters, storyId, 
   const recreate = !!sceneImage?.base64
 
   const fullPrompt = recreate
-    ? `Recreate the attached photograph as a ${styleDesc} illustration.
+    ? `Redraw the attached photograph as a ${styleDesc} illustration, keeping EVERYTHING in it exactly as it is.
 
-This must be a faithful, exact recreation of the photograph:
-- Keep the same number of people, in the same positions, with the same poses, expressions, clothing, hair, skin tones and faces, so each person is clearly recognisable.
-- Keep the same place, background, objects, signs, colours, lighting and camera angle, and the same framing and composition.
-- Do NOT add, remove, move or swap anything. Do not add people, animals, birds, creatures or props that are not in the photograph. Do not change the setting.
-- The ONLY change is the rendering style: redraw the whole photograph in the ${style || 'chosen'} illustration style described above, so it looks like a page from a picture book. Never leave it looking like a photograph.
-- Square image. No text or words, except lettering that is physically part of a sign or shirt in the photograph, drawn as simply as possible. Child-safe.
-
-For reference, this is what the page of the story says is happening: ${imagePrompt}
-If that description disagrees with the photograph, the photograph wins.`
+The attached photograph is the only source. It is a strict, faithful copy, with only the drawing style changed:
+- Exactly the same people. The same number of people, the same faces, hair, skin tones, clothing, poses, expressions and positions, each clearly recognisable as the same person.
+- Exactly the same place, background, furniture, food, objects, animals, signs, sky, light, colours, camera angle and framing.
+- Do NOT add anything. No extra people, no new characters, no animals or props that are not in the photograph. Do NOT remove, move, swap or replace anything or anyone. Do not change the setting, the time of day or the mood.
+- The one and only change is the drawing style: render the whole photograph in the ${style || 'chosen'} illustration style described above, so it looks like a picture book page, never like a photograph.
+- Square image. Draw lettering only where it is physically part of the photograph, as simply as possible. Child-safe.`
     : `${styleDesc} children's picture book full-page illustration.
 
 THE SCENE:

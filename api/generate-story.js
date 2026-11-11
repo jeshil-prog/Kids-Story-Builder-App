@@ -155,11 +155,12 @@ ${languageRule}${endingRule}
 Respond ONLY with valid JSON. No markdown, no code fences, no extra text.`
 
   const pictureRule = pictures.length > 0
-    ? `The person has supplied ${pictures.length} ${pictures.length === 1 ? 'picture' : 'pictures'}, shown above in order. Each picture will be recreated EXACTLY, as it is, as the illustration for one page, only redrawn in the chosen art style. So the story must be built around the pictures, and must never contradict them.
-- Write exactly ${pictures.length} ${pictures.length === 1 ? 'scene' : 'scenes'}. Scene 1 uses picture 1, scene 2 uses picture 2, and so on.
-- Study each picture closely. The people in the pictures are the stars of the story: use the character names given below for them, matching each name to the person it fits best. If a picture shows a person who matches none of the named characters, give them a simple friendly role without inventing a new name for them.
-- Each scene's narration must describe what is really in its picture: who is there, how many people, what they are wearing and doing, where they are, and the objects and surroundings that can be seen. Do not describe anything that is not visible. Then move the story forward, so all the pages read as one adventure that naturally includes every picture.
-- Each imagePrompt must be a plain, literal description of exactly what is visible in that picture (people and their positions, clothing, poses, expressions, the place, objects, light), and nothing else. Do not invent extra people, animals, creatures, magic or props in an imagePrompt.
+    ? `The person has supplied ${pictures.length} ${pictures.length === 1 ? 'picture' : 'pictures'}, shown above in order. Each picture is used EXACTLY AS IT IS as the illustration for one page. It is only redrawn in the chosen art style, and nothing in it is added, removed or changed. So the pictures are fixed, and the story must be written to fit them. The pictures must never be made to fit the story.
+- Write exactly ${pictures.length} ${pictures.length === 1 ? 'scene' : 'scenes'}. Scene 1 goes with picture 1, scene 2 with picture 2, and so on.
+- Study each picture closely. Each scene's narration must describe what is really in its picture: the people (how many, what they wear, what they do), animals, the place and the things that can be seen. Do not describe anything that cannot be seen.
+- The starring characters named below may or may not appear in the pictures. Only treat a person in a picture as one of the named characters if that character's description clearly matches them. If a named character is not in a picture, do NOT put them in it. Write the scene so it makes sense without them: for example the character is nearby, is the one who took the picture, is remembering the moment, is on the way there, or is hearing about it. People in a picture who match no named character are described simply (for example "a smiling woman", "an older lady") without inventing names.
+- Keep all the pages reading as one connected story that moves forward from picture to picture.
+- Each imagePrompt must be a plain, literal description of exactly what is visible in that picture and nothing else. Never add anyone or anything that is not visible, and never put a named character into an imagePrompt unless they are visibly in the picture.
 - Never mention photos or pictures in the narration.\n\n`
     : ''
 
