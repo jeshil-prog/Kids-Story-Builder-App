@@ -1,6 +1,7 @@
 import OpenAI, { toFile } from 'openai'
 import { redisSet } from './redis.js'
 import { uploadToS3 } from './s3.js'
+import { getImageEditModel } from './imageModel.js'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -130,8 +131,7 @@ This is an edit of the photograph, not a new picture. Only the drawing style cha
   const mime = sceneImage.mime === 'image/png' ? 'image/png' : 'image/jpeg'
   const photo = await toFile(Buffer.from(sceneImage.base64, 'base64'), mime === 'image/png' ? 'photo.png' : 'photo.jpg', { type: mime })
   const result = await openai.images.edit({
-    // No model is named on purpose: OpenAI's current default image model is used.
-    // (Naming 'gpt-image-1' fails on this account: that model no longer exists.)
+    model: await getImageEditModel(openai),
     image: photo,
     prompt,
     size: 'auto',
