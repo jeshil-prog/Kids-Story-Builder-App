@@ -33,15 +33,26 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Missing storyId or sceneIndex' })
   }
   // A picture the person supplied for this page (Tier 2). Kept small on purpose.
-  const cleanSceneImage = sceneImage && typeof sceneImage.base64 === 'string' && sceneImage.base64.length <= 450000
+  let cleanSceneImage = sceneImage && typeof sceneImage.base64 === 'string' && sceneImage.base64.length <= 450000
     ? { base64: sceneImage.base64, mime: sceneImage.mime === 'image/png' ? 'image/png' : 'image/jpeg' }
     : null
 
   const imageKey = `story:${storyId}:scene:${sceneIndex}`
+  const photoKey = `scenephoto:${storyId}:${sceneIndex}`
   const audioKey = `story:${storyId}:scene:${sceneIndex}:audio`
   let imageAlreadyDone = false
 
   try {
+    // A page made from the person's own photo must always be made from that photo.
+    // The photo is held here for an hour, so that if the first attempt fails and the
+    // player asks again (without the photo), the retry still uses the photo and never
+    // draws an invented picture in its place.
+    if (cleanSceneImage) {
+      await redisSet(photoKey, cleanSceneImage, 3600).catch(() => {})
+    } else {
+      cleanSceneImage = await redisGet(photoKey).catch(() => null)
+    }
+
     const existingImage = await redisGet(imageKey).catch(() => null)
     imageAlreadyDone = existingImage?.status === 'done'
     if (!imageAlreadyDone) await redisSet(imageKey, { status: 'processing' }, 3600)

@@ -79,7 +79,8 @@ export default async function handler(req, res) {
     // photo far more faithfully than asking a chat model to draw from a reference.
     const photo = await toFile(Buffer.from(b64, 'base64'), mime === 'image/png' ? 'photo.png' : 'photo.jpg', { type: mime })
     const result = await openai.images.edit({
-      model: 'gpt-image-1',
+      // No model is named on purpose: OpenAI's current default image model is used.
+      // (Naming 'gpt-image-1' fails on this account: that model no longer exists.)
       image: photo,
       prompt: PROMPT,
       size: '1024x1024',
