@@ -9,7 +9,7 @@
 
 export const config = { maxDuration: 120 }
 
-import OpenAI from 'openai'
+import OpenAI, { toFile } from 'openai'
 import { randomUUID } from 'crypto'
 import { getUserId } from './_lib/authUser.js'
 import { supabaseAdmin } from './_lib/supabaseAdmin.js'
@@ -22,11 +22,15 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 const DAILY_LIMIT = 40
 const MAX_PHOTO_B64 = 3000000
 
-const PROMPT = `Create a charming Pixar style 3D animated movie character portrait of the person in the reference photo.
-- Head and shoulders, centred, facing the viewer with a warm friendly smile.
-- Make it clearly a cartoon character, not a photo, but keep what makes this person recognisable: hair colour and style, skin tone, eye colour, face shape, glasses, freckles and similar features.
-- Soft, simple pastel gradient background. Warm cinematic lighting.
-- No text, no logos, no frames. Child safe.`
+const PROMPT = `Redraw the person in this photo as a Pixar style 3D animated movie character portrait, with a TRUE LIKENESS.
+
+The portrait must look unmistakably like this exact person, so someone who knows them would recognise them at once. Keep:
+- the same face shape, jaw and cheeks, forehead, eyebrows (shape and thickness), eye shape, size and colour, nose, lips and the exact smile, including teeth and any gap;
+- the same skin tone and every distinguishing mark (freckles, moles, a forehead dot or bindi, dimples, beard, glasses, earrings);
+- the same hairline, hair colour, length, texture and style, and the same apparent age;
+- the same expression and head angle as the photo.
+Do not make them younger, prettier, rounder or more generic, and do not change their features to look more "cartoon". Only the rendering changes: smooth, soft 3D animation look with warm cinematic lighting.
+Head and shoulders, centred. Keep the clothes' colour and neckline from the photo. Simple soft pastel background. No text, no logos, no frames. Child safe.`
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -71,26 +75,27 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await openai.responses.create({
-      model: 'gpt-5.5',
-      input: [{
-        role: 'user',
-        content: [
-          { type: 'input_text', text: PROMPT },
-          { type: 'input_image', image_url: `data:${mime};base64,${b64}` }
-        ]
-      }],
-      // Low quality is plenty for a small round portrait, and is much quicker.
-      tools: [{ type: 'image_generation', quality: 'low', size: '1024x1024', output_format: 'jpeg', output_compression: 85 }]
+    // The Images "edit" endpoint with high input fidelity keeps the face of the
+    // photo far more faithfully than asking a chat model to draw from a reference.
+    const photo = await toFile(Buffer.from(b64, 'base64'), mime === 'image/png' ? 'photo.png' : 'photo.jpg', { type: mime })
+    const result = await openai.images.edit({
+      model: 'gpt-image-1',
+      image: photo,
+      prompt: PROMPT,
+      size: '1024x1024',
+      quality: 'medium',
+      input_fidelity: 'high',
+      output_format: 'jpeg',
+      output_compression: 85
     })
 
-    const image = (response.output || []).find((o) => o.type === 'image_generation_call' && o.result)
-    if (!image) {
-      console.error('Avatar: no image came back', { outputTypes: (response.output || []).map((o) => o.type) })
+    const imageB64 = result.data?.[0]?.b64_json
+    if (!imageB64) {
+      console.error('Avatar: no image came back')
       return res.status(422).json({ error: 'We could not make a cartoon portrait from that photo. Try a clearer photo, or a different one.' })
     }
 
-    const url = await uploadToS3(image.result, 'image/jpeg', `avatars/${randomUUID()}.jpg`)
+    const url = await uploadToS3(imageB64, 'image/jpeg', `avatars/${randomUUID()}.jpg`)
 
     // An old stored photo is swapped for the cartoon and then removed for good.
     if (oldKey) {

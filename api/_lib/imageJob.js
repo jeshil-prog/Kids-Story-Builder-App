@@ -48,7 +48,7 @@ The attached photograph is the only source. It is a strict, faithful copy, with 
 - Exactly the same place, background, furniture, food, objects, animals, signs, sky, light, colours, camera angle and framing.
 - Do NOT add anything. No extra people, no new characters, no animals or props that are not in the photograph. Do NOT remove, move, swap or replace anything or anyone. Do not change the setting, the time of day or the mood.
 - The one and only change is the drawing style: render the whole photograph in the ${style || 'chosen'} illustration style described above, so it looks like a picture book page, never like a photograph.
-- Square image. Draw lettering only where it is physically part of the photograph, as simply as possible. Child-safe.`
+- Keep the photograph's own shape and framing (do not crop it to a square). Draw lettering only where it is physically part of the photograph, as simply as possible. Child-safe.`
     : `${styleDesc} children's picture book full-page illustration.
 
 THE SCENE:
@@ -79,10 +79,19 @@ STYLE RULES: Wide cinematic composition. Rich detailed environment. Characters i
 
   const response = await openai.responses.create({
     model: 'gpt-5.5',
+    // A supplied photo is EDITED into the chosen style, never re-imagined. The tool is
+    // forced to edit mode, the prompt is passed through unchanged, and high input
+    // fidelity makes the picture keep the detail of the photograph.
+    ...(recreate ? {
+      instructions: 'You only call the image tool. Call it exactly once, in edit mode on the attached photograph, with the user prompt passed through word for word. Never rewrite, shorten or add to the prompt.',
+      tool_choice: { type: 'image_generation' }
+    } : {}),
     input: [{ role: 'user', content }],
     // JPEG keeps each picture a fraction of the size of a PNG, so pages load fast.
-    // input_fidelity high makes the model hold on to the details of a supplied photo.
-    tools: [{ type: 'image_generation', quality: 'medium', size: '1024x1024', output_format: 'jpeg', output_compression: 85, ...(recreate ? { input_fidelity: 'high' } : {}) }],
+    tools: [{
+      type: 'image_generation', quality: 'medium', size: recreate ? 'auto' : '1024x1024', output_format: 'jpeg', output_compression: 85,
+      ...(recreate ? { action: 'edit', input_fidelity: 'high' } : {})
+    }],
     background: true
   })
 
