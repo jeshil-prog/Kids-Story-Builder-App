@@ -12,10 +12,11 @@
 // OpenAI rate limits. Generating it once here, like images already work,
 // means playback is just a stored file with nothing left to rate-limit.
 
-export const config = { maxDuration: 60 }
+// A photo page is edited start to finish inside this request, which can take a minute or two.
+export const config = { maxDuration: 300 }
 
 import { redisSet, redisGet } from './_lib/redis.js'
-import { submitImageJob } from './_lib/imageJob.js'
+import { submitImageJob, editPhotoScene } from './_lib/imageJob.js'
 import { generateNarrationAudio } from './_lib/narrationJob.js'
 import { getUserId } from './_lib/authUser.js'
 
@@ -47,7 +48,9 @@ export default async function handler(req, res) {
 
     const imageJobPromise = imageAlreadyDone
       ? Promise.resolve({ id: null, status: 'already_done' })
-      : submitImageJob({ imagePrompt, style, characters, storyId, sceneIndex, sceneImage: cleanSceneImage })
+      : cleanSceneImage
+        ? editPhotoScene({ style, storyId, sceneIndex, sceneImage: cleanSceneImage })
+        : submitImageJob({ imagePrompt, style, characters, storyId, sceneIndex })
 
     // Only (re)generate narration if it doesn't already exist — this matters
     // for the backfill poller's retry path, which resubmits this whole

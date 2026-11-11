@@ -1,5 +1,6 @@
-import OpenAI from 'openai'
+import OpenAI, { toFile } from 'openai'
 import { redisSet } from './redis.js'
+import { uploadToS3 } from './s3.js'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -106,4 +107,42 @@ STYLE RULES: Wide cinematic composition. Rich detailed environment. Characters i
   )
 
   return response
+}
+
+
+// A person's own picture, redrawn in the chosen style. This uses the Images
+// "edit" route: the photograph itself is the starting point and is edited, so the
+// people, place and layout stay as they are and only the drawing style changes.
+// (Drawing "from" a photo through a chat model reinvents the picture instead.)
+// It runs to the end inside the request, stores the result, and marks the scene
+// done in Redis, the same place the background jobs report to.
+export async function editPhotoScene({ style, storyId, sceneIndex, sceneImage }) {
+  const styleDesc = STYLE_PROMPTS[style] || "children's book illustration, warm and magical"
+  const prompt = `Redraw this photograph as a ${styleDesc} illustration, keeping EVERYTHING in it exactly as it is.
+
+This is an edit of the photograph, not a new picture. Only the drawing style changes:
+- Exactly the same people: the same number of people, in the same positions, with the same faces, hair, skin tones, clothing, poses and expressions, each clearly recognisable as the same person.
+- Exactly the same place, background, objects, animals, signs, sky, light, colours, camera angle and framing.
+- Do NOT add, remove, move, swap or replace anything or anyone. No extra people, characters, animals or props. Do not change the setting, the time of day or the mood.
+- Render the whole picture in the ${style || 'chosen'} illustration style, so it looks like a picture book page and not like a photograph.
+- Draw lettering only where it is physically part of the photograph, as simply as possible. Child-safe.`
+
+  const mime = sceneImage.mime === 'image/png' ? 'image/png' : 'image/jpeg'
+  const photo = await toFile(Buffer.from(sceneImage.base64, 'base64'), mime === 'image/png' ? 'photo.png' : 'photo.jpg', { type: mime })
+  const result = await openai.images.edit({
+    model: 'gpt-image-1',
+    image: photo,
+    prompt,
+    size: 'auto',
+    quality: 'medium',
+    input_fidelity: 'high',
+    output_format: 'jpeg',
+    output_compression: 85
+  })
+  const b64 = result.data?.[0]?.b64_json
+  if (!b64) throw new Error('No image came back from the photo edit')
+
+  const imageUrl = await uploadToS3(b64, 'image/jpeg', `scenes/${storyId}/${sceneIndex}.jpg`)
+  await redisSet(`story:${storyId}:scene:${sceneIndex}`, { status: 'done', imageUrl }, 3600)
+  return { id: null, status: 'completed' }
 }

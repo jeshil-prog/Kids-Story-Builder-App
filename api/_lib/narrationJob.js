@@ -116,7 +116,7 @@ async function transcribeWordTimes(audioBuffer, narrationText, lang = 'en') {
 
 export async function generateNarrationAudio({ narrationText, storyId, sceneIndex, language = 'en' }) {
   const langName = LANGUAGE_NAMES[language] || 'English'
-  const baseVoice = 'Speak warmly and gently, like a parent reading a bedtime story. Use a calm, expressive, storytelling tone.'
+  const baseVoice = 'Speak warmly and gently, like a parent reading a story aloud to a child. Use a calm, expressive, storytelling tone.'
   const instructions = language === 'en' ? baseVoice : `${baseVoice} The text is in ${langName}. Read it aloud in natural, native ${langName}, with a clear and friendly accent.`
 
   const response = await fetch('https://api.openai.com/v1/audio/speech', {
