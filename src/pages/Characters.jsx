@@ -31,6 +31,33 @@ function compressImage(dataUrl, mimeType) {
   })
 }
 
+// Crops the ORIGINAL photo (not the shrunken copy) to a box around one person, so a
+// photo with several people becomes a photo of just the one the portrait is of.
+// The box is in fractions of the photo. The crop is made square with some room
+// around the head and shoulders, then shrunk to the same size limit as any photo.
+function cropToBox(dataUrl, box) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      const W = img.naturalWidth, H = img.naturalHeight
+      const cx = (box.x + box.w / 2) * W
+      const cy = (box.y + box.h / 2) * H
+      let side = Math.max(box.w * W, box.h * H) * 1.35
+      side = Math.min(side, W, H)
+      let sx = Math.max(0, Math.min(W - side, cx - side / 2))
+      let sy = Math.max(0, Math.min(H - side, cy - side / 2))
+      const out = Math.min(side, MAX_PHOTO_SIZE)
+      const canvas = document.createElement('canvas')
+      canvas.width = out
+      canvas.height = out
+      canvas.getContext('2d').drawImage(img, sx, sy, side, side, 0, 0, out, out)
+      resolve(canvas.toDataURL('image/jpeg', 0.85))
+    }
+    img.onerror = () => reject(new Error('Could not read the photo'))
+    img.src = dataUrl
+  })
+}
+
 // We never keep photos of people. A photo is used for one moment: it is turned
 // into a cartoon (Pixar style) portrait, and described for the illustrator. Only
 // the cartoon and the description are saved. The photo lives in this form's
@@ -50,6 +77,9 @@ function CharacterForm({ initial, onSave, onCancel }) {
   const [portraitError, setPortraitError] = useState(null)
   const [description, setDescription] = useState(initial?.description || '')
   const [analysing, setAnalysing] = useState(false)
+  const [describeError, setDescribeError] = useState(null)
+  const [findingPerson, setFindingPerson] = useState(false)
+  const portraitBusy = makingPortrait || findingPerson
   const fileRef = useRef()
   // handleSave waits for the portrait if it is still being made.
   const portraitPromiseRef = useRef(null)
@@ -84,18 +114,19 @@ function CharacterForm({ initial, onSave, onCancel }) {
 
   const analysePhoto = async (base64, nameToUse, ageToUse) => {
     setAnalysing(true)
+    setDescribeError(null)
     try {
       const res = await fetch('/api/describe-character', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ photoBase64: base64, mimeType: 'image/jpeg', name: nameToUse, age: ageToUse })
       })
-      if (res.ok) {
-        const { description: desc } = await res.json()
-        setDescription(desc)
-      }
+      if (!res.ok) throw new Error('describe failed')
+      const { description: desc } = await res.json()
+      setDescription(desc)
     } catch (err) {
       console.error('Photo analysis failed:', err)
+      setDescribeError('We could not describe the photo. Tap "Describe the photo again", or write the description yourself.')
     }
     setAnalysing(false)
   }
@@ -106,10 +137,33 @@ function CharacterForm({ initial, onSave, onCancel }) {
     if (!file) return
     const reader = new FileReader()
     reader.onload = async () => {
-      const compressed = await compressImage(reader.result, file.type)
-      const base64 = compressed.split(',')[1]
-      setPhotoBase64(base64)
+      // A new photo means a new portrait and a new description. Clear the old ones
+      // straight away so an old description can never be left sitting there.
       setPortraitUrl(null)
+      setPortraitError(null)
+      setDescription('')
+      setDescribeError(null)
+      const original = reader.result
+      const compressed = await compressImage(original, file.type)
+      let base64 = compressed.split(',')[1]
+      // If more than one person is in the photo, keep only the one this character is.
+      setFindingPerson(true)
+      try {
+        const res = await fetch('/api/find-subject', {
+          method: 'POST',
+          headers: await authHeaders(),
+          body: JSON.stringify({ photoBase64: base64, name, age, role })
+        })
+        const data = await res.json().catch(() => ({}))
+        if (res.ok && data.box) {
+          const cropped = await cropToBox(original, data.box)
+          base64 = cropped.split(',')[1]
+        }
+      } catch (err) {
+        console.error('Could not pick out the person, using the whole photo:', err)
+      }
+      setFindingPerson(false)
+      setPhotoBase64(base64)
       // The cartoon and the description are made side by side.
       makePortrait(base64)
       analysePhoto(base64, name || initial?.name || 'the character', age || initial?.age)
@@ -148,7 +202,7 @@ function CharacterForm({ initial, onSave, onCancel }) {
       {/* Portrait */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
         <div
-          onClick={() => !makingPortrait && fileRef.current.click()}
+          onClick={() => !portraitBusy && fileRef.current.click()}
           style={{
             width: 80, height: 80, borderRadius: '50%', cursor: 'pointer',
             border: '2px dashed var(--border-strong)',
@@ -158,7 +212,7 @@ function CharacterForm({ initial, onSave, onCancel }) {
           onMouseEnter={e => e.currentTarget.style.borderColor = '#534AB7'}
           onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border-strong)'}
         >
-          {makingPortrait
+          {portraitBusy
             ? <Spinner size={22} />
             : showing
               ? <SmartImage src={showing} alt="Cartoon portrait" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
@@ -170,8 +224,8 @@ function CharacterForm({ initial, onSave, onCancel }) {
           <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
             Upload a clear photo and we turn it into a Pixar style portrait. We describe the photo for the illustrator, then the photo is thrown away. Only the cartoon is kept.
           </p>
-          <button onClick={() => fileRef.current.click()} disabled={makingPortrait} style={{ fontSize: 12, color: '#534AB7', background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginTop: 4 }}>
-            {makingPortrait ? 'Making the portrait…' : portraitUrl ? 'Use a different photo' : 'Upload photo'}
+          <button onClick={() => fileRef.current.click()} disabled={portraitBusy} style={{ fontSize: 12, color: '#534AB7', background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginTop: 4 }}>
+            {portraitBusy ? 'Making the portrait…' : portraitUrl ? 'Use a different photo' : 'Upload photo'}
           </button>
           {portraitError && (
             <p style={{ fontSize: 12, color: '#E24B4A', margin: '6px 0 0', lineHeight: 1.5 }}>
@@ -242,7 +296,10 @@ function CharacterForm({ initial, onSave, onCancel }) {
             }}
           />
         )}
-        {description && (
+        {describeError && !analysing && (
+          <p style={{ fontSize: 11, color: '#C0392B', marginTop: 5 }}>{describeError}</p>
+        )}
+        {description && !describeError && (
           <p style={{ fontSize: 11, color: '#1D9E75', marginTop: 5 }}>
             ✓ Description ready. It will be used in every scene illustration.
           </p>
@@ -251,8 +308,8 @@ function CharacterForm({ initial, onSave, onCancel }) {
 
       <div style={{ display: 'flex', gap: 10 }}>
         <Button onClick={onCancel} variant="secondary" style={{ flex: 1 }}>Cancel</Button>
-        <Button onClick={handleSave} disabled={!valid || makingPortrait} style={{ flex: 1 }}>
-          {makingPortrait ? 'Making portrait…' : 'Save character'}
+        <Button onClick={handleSave} disabled={!valid || portraitBusy} style={{ flex: 1 }}>
+          {portraitBusy ? 'Making portrait…' : 'Save character'}
         </Button>
       </div>
     </div>

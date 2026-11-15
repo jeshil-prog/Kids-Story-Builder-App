@@ -23,11 +23,11 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 const DAILY_LIMIT = 40
 const MAX_PHOTO_B64 = 3000000
 
-const PROMPT = `Redraw the person in this photo as a Pixar style 3D animated movie character portrait, with a TRUE LIKENESS.
+const PROMPT = `Redraw the main person in this photo (if anyone else is partly in the picture, ignore them completely and draw only the main person) as a Pixar style 3D animated movie character portrait, with a TRUE LIKENESS.
 
 The portrait must look unmistakably like this exact person, so someone who knows them would recognise them at once. Keep:
 - the same face shape, jaw and cheeks, forehead, eyebrows (shape and thickness), eye shape, size and colour, nose, lips and the exact smile, including teeth and any gap;
-- the same skin tone and every distinguishing mark (freckles, moles, a forehead dot or bindi, dimples, beard, glasses, earrings);
+- the same skin tone and every distinguishing mark that is actually visible in the photo, such as freckles, moles, dimples or a gap in the teeth. Never add anything that is not in the photo: no glasses, jewellery, facial hair, forehead marks or make up unless the person in the photo has them;
 - the same hairline, hair colour, length, texture and style, and the same apparent age;
 - the same expression and head angle as the photo.
 Do not make them younger, prettier, rounder or more generic, and do not change their features to look more "cartoon". Only the rendering changes: smooth, soft 3D animation look with warm cinematic lighting.
