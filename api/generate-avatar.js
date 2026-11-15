@@ -23,7 +23,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 const DAILY_LIMIT = 40
 const MAX_PHOTO_B64 = 3000000
 
-const PROMPT = `Redraw the main person in this photo (if anyone else is partly in the picture, ignore them completely and draw only the main person) as a Pixar style 3D animated movie character portrait, with a TRUE LIKENESS.
+const PERSON_PROMPT = `Redraw the main person in this photo (if anyone else is partly in the picture, ignore them completely and draw only the main person) as a Pixar style 3D animated movie character portrait, with a TRUE LIKENESS.
 
 The portrait must look unmistakably like this exact person, so someone who knows them would recognise them at once. Keep:
 - the same face shape, jaw and cheeks, forehead, eyebrows (shape and thickness), eye shape, size and colour, nose, lips and the exact smile, including teeth and any gap;
@@ -33,13 +33,22 @@ The portrait must look unmistakably like this exact person, so someone who knows
 Do not make them younger, prettier, rounder or more generic, and do not change their features to look more "cartoon". Only the rendering changes: smooth, soft 3D animation look with warm cinematic lighting.
 Head and shoulders, centred. Keep the clothes' colour and neckline from the photo. Simple soft pastel background. No text, no logos, no frames. Child safe.`
 
+const ANIMAL_PROMPT = `Redraw the animal in this photo as a Pixar style 3D animated movie character portrait, with a TRUE LIKENESS.
+
+It must stay the same kind of animal and look unmistakably like this exact pet, so its owner would recognise it at once. Keep:
+- the same species and breed look, head shape, ear shape and position, muzzle length, nose colour and shape, eye shape and colour;
+- the same coat colours, patterns, markings and fur length and texture, including any patches, spots or white areas, exactly where they are in the photo;
+- the same expression and head angle as the photo, including the tongue if it is out.
+Never turn the animal into a human or a human-like child, and never give it human hair, human skin, human teeth or a human face. Do not add a collar, clothes or accessories that are not in the photo. If any people are partly in the picture, ignore them completely and draw only the animal. Only the rendering changes: smooth, soft 3D animation look with warm cinematic lighting.
+Head and chest, centred. Simple soft pastel background. No text, no logos, no frames. Child safe.`
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
   const userId = await getUserId(req)
   if (!userId) return res.status(401).json({ error: 'Not authenticated' })
 
-  const { photoBase64, mimeType, sourceUrl } = req.body || {}
+  const { photoBase64, mimeType, sourceUrl, subject } = req.body || {}
 
   // Work out where the photo comes from.
   let b64 = null
@@ -82,7 +91,7 @@ export default async function handler(req, res) {
     const result = await openai.images.edit({
       model: await getImageEditModel(openai),
       image: photo,
-      prompt: PROMPT,
+      prompt: subject === 'animal' ? ANIMAL_PROMPT : PERSON_PROMPT,
       size: '1024x1024',
       quality: 'medium',
       input_fidelity: 'high',

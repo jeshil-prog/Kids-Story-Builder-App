@@ -80,6 +80,8 @@ function CharacterForm({ initial, onSave, onCancel }) {
   const [describeError, setDescribeError] = useState(null)
   const [findingPerson, setFindingPerson] = useState(false)
   const portraitBusy = makingPortrait || findingPerson
+  // 'person' or 'animal', worked out when the photo is picked, so a pet is drawn as a pet.
+  const subjectKindRef = useRef(null)
   const fileRef = useRef()
   // handleSave waits for the portrait if it is still being made.
   const portraitPromiseRef = useRef(null)
@@ -97,7 +99,7 @@ function CharacterForm({ initial, onSave, onCancel }) {
         const res = await fetch('/api/generate-avatar', {
           method: 'POST',
           headers: await authHeaders(),
-          body: JSON.stringify({ photoBase64: base64, mimeType: 'image/jpeg' })
+          body: JSON.stringify({ photoBase64: base64, mimeType: 'image/jpeg', subject: subjectKindRef.current })
         })
         const data = await res.json().catch(() => ({}))
         if (!res.ok || !data.url) throw new Error(data.error || 'Could not make the portrait.')
@@ -147,6 +149,7 @@ function CharacterForm({ initial, onSave, onCancel }) {
       const compressed = await compressImage(original, file.type)
       let base64 = compressed.split(',')[1]
       // If more than one person is in the photo, keep only the one this character is.
+      subjectKindRef.current = null
       setFindingPerson(true)
       try {
         const res = await fetch('/api/find-subject', {
@@ -155,6 +158,7 @@ function CharacterForm({ initial, onSave, onCancel }) {
           body: JSON.stringify({ photoBase64: base64, name, age, role })
         })
         const data = await res.json().catch(() => ({}))
+        subjectKindRef.current = res.ok ? (data.kind || null) : null
         if (res.ok && data.box) {
           const cropped = await cropToBox(original, data.box)
           base64 = cropped.split(',')[1]

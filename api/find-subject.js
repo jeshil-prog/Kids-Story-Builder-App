@@ -44,13 +44,13 @@ export default async function handler(req, res) {
             { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: photoBase64 } },
             {
               type: 'text',
-              text: `A cartoon portrait is going to be made of one person in this photo${who ? `, a person ${who}` : ''}. The photo may show other people too, for example a baby sitting on an adult's lap, or part of an adult at the edge of the picture.
+              text: `A cartoon portrait is going to be made of one subject in this photo${who ? `, described as: ${who}` : ''}. The subject can be a person or a pet or other animal. The photo may show other people or animals too, for example a baby sitting on an adult's lap, or part of an adult at the edge of the picture.
 
-Decide which ONE person the portrait is of. Use the age and description if they were given (a baby means the baby, not the adults). If nothing was given, choose the main subject: the person who is most central and most clearly the focus of the photo.
+Decide which ONE subject the portrait is of. Use the age and description if they were given (a baby means the baby, not the adults; a pet dog means the dog, not any people). If nothing was given, choose the main subject: the one that is most central and most clearly the focus of the photo.
 
 Answer with JSON only, nothing else, in this exact shape:
-{"people": <how many people are visible, counting partly visible ones>, "x": <left edge>, "y": <top edge>, "w": <width>, "h": <height>}
-The box x, y, w, h goes around that one person's head and shoulders. All four numbers are fractions of the whole photo from 0 to 1, measured from the top left corner.`
+{"count": <how many people or animals are visible, counting partly visible ones>, "kind": "person" or "animal" (for the chosen subject), "x": <left edge>, "y": <top edge>, "w": <width>, "h": <height>}
+The box x, y, w, h goes around that one subject's head and shoulders (or head and chest for an animal). All four numbers are fractions of the whole photo from 0 to 1, measured from the top left corner.`
             }
           ]
         }]
@@ -70,14 +70,15 @@ The box x, y, w, h goes around that one person's head and shoulders. All four nu
     console.log('find-subject:', JSON.stringify(out))
 
     const n = (v) => (typeof v === 'number' && isFinite(v) ? v : null)
-    const people = n(out.people)
+    const people = n(out.count)
+    const kind = out.kind === 'animal' ? 'animal' : out.kind === 'person' ? 'person' : null
     const x = n(out.x), y = n(out.y), w = n(out.w), h = n(out.h)
     // One person in the photo: nothing to crop.
-    if (people !== null && people <= 1) return res.status(200).json({ box: null })
-    if (x === null || y === null || w === null || h === null) return res.status(200).json({ box: null })
-    if (w < 0.05 || h < 0.05 || x < 0 || y < 0 || x + w > 1.02 || y + h > 1.02) return res.status(200).json({ box: null })
+    if (people !== null && people <= 1) return res.status(200).json({ box: null, kind })
+    if (x === null || y === null || w === null || h === null) return res.status(200).json({ box: null, kind })
+    if (w < 0.05 || h < 0.05 || x < 0 || y < 0 || x + w > 1.02 || y + h > 1.02) return res.status(200).json({ box: null, kind })
 
-    return res.status(200).json({ box: { x, y, w, h } })
+    return res.status(200).json({ box: { x, y, w, h }, kind })
   } catch (err) {
     console.error('find-subject error:', err)
     // Never block making a portrait because this step failed.
